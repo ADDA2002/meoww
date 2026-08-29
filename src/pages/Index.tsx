@@ -41,10 +41,10 @@ const Index = () => {
         <div className="flex items-center gap-2">
           <img
             src="/logo.gif"
-            alt="Jam Session Logo"
+            alt="Meoww Together Logo"
             className="w-8 h-8 object-contain"
           />
-          <span className="font-bold tracking-wider text-sm uppercase">Jam Session</span>
+          <span className="font-bold tracking-wider text-sm uppercase">Meoww Together</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
           <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
@@ -58,7 +58,7 @@ const Index = () => {
           {/* Hero text */}
           <div className="text-center mb-8">
             <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
-              Jam Together
+              Meoww Together
             </h1>
             <p className="text-gray-600 text-sm max-w-md mx-auto">
               Synchronized, zero-budget music listening room for couples and friends.
@@ -192,7 +192,7 @@ const Index = () => {
 
       {/* Footer */}
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
-        Jam Together &bull; Monochromatic Audio Streamer
+        Meoww Together &bull; Monochromatic Audio Streamer
       </footer>
     </div>
   );

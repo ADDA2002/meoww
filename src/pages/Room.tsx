@@ -106,8 +106,8 @@ const Room = () => {
 
     // A deterministic peer ID for the host so others can join, and random for listeners
     const generatedId = isHost 
-      ? `jam-room-${roomCode.toLowerCase()}` 
-      : `jam-user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
+      ? `meoww-room-${roomCode.toLowerCase()}` 
+      : `meoww-user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
     setMyId(generatedId);
 
@@ -130,7 +130,7 @@ const Room = () => {
       
       if (!isHost) {
         // Connect to host peer
-        const hostPeerId = `jam-room-${roomCode.toLowerCase()}`;
+        const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
         const conn = peer.connect(hostPeerId, { reliable: true });
         setupConnection(conn, currentUser);
       }
@@ -551,8 +551,12 @@ const Room = () => {
             onClick={() => navigate("/")}
             className="flex items-center gap-2 hover:opacity-80 transition-opacity"
           >
-            <div className="w-3.5 h-3.5 bg-black"></div>
-            <span className="font-extrabold tracking-wider text-sm uppercase">JAM TOGETHER</span>
+            <img
+              src="/logo.gif"
+              alt="Meoww Together Logo"
+              className="w-5 h-5 object-contain"
+            />
+            <span className="font-extrabold tracking-wider text-sm uppercase">MEOWW TOGETHER</span>
           </button>
           <span className="text-gray-300">/</span>
           <div className="flex items-center gap-1.5 font-mono text-xs font-bold bg-gray-100 px-2 py-1 border border-gray-300">
@@ -966,7 +970,7 @@ const Room = () => {
       {/* Bottom status strip */}
       <footer className="border-t border-black py-2.5 px-4 sm:px-8 flex justify-between items-center text-xs font-mono bg-white text-gray-600">
         <div>CONNECTED AS: <span className="font-bold text-black uppercase">{userName}</span></div>
-        <div>MONOCHROMATIC JAM &bull; LOW LATENCY SYNC</div>
+        <div>MEOWW TOGETHER &bull; LOW LATENCY SYNC</div>
       </footer>
     </div>
   );
