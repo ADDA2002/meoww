@@ -849,7 +849,7 @@ const Room = () => {
               <span className="text-xs font-mono text-gray-500">REALTIME</span>
             </div>
 
-            <div className="space-y-2 max-h-36 overflow-y-auto">
+            <div className="space-y-2">
               {users.map((user) => (
                 <div
                   key={user.id}
