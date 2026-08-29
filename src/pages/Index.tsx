@@ -53,27 +53,24 @@ const Index = () => {
         <div className="w-full max-w-xl">
           {/* Hero text */}
           <div className="text-center mb-6">
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-4">
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
               Jam Together
             </h1>
-            {/* Cat GIF above tabs, no background */}
-            <img
-              src="/1kLR.gif"
-              alt="Cat mascot"
-              className={`mx-auto mb-4 transition-all duration-500 ${
-                activeTab ? "w-16 h-16 sm:w-20 sm:h-20" : "w-20 h-20 sm:w-24 sm:h-24"
-              }`}
-            />
             <p className="text-gray-600 text-sm max-w-md mx-auto">
               Synchronized, zero-budget music listening room for couples and friends.
             </p>
           </div>
 
-          {/* Tab Strip + Curtain Drawers */}
-          <div 
-            className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all duration-300"
-          >
-            <div className="flex border-b border-black">
+          {/* Cat GIF attached to top of the tab strip */}
+          <div className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            <img
+              src="/1kLR.gif"
+              alt="Cat mascot"
+              className={`w-full object-contain transition-all duration-500 ${
+                activeTab ? "h-16 sm:h-20" : "h-20 sm:h-24"
+              }`}
+            />
+            <div className="flex border-t border-black">
               {/* Create Room Tab */}
               <button
                 type="button"
