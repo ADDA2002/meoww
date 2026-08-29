@@ -70,20 +70,16 @@
   }
 }
 
-@keyframes spin {
+/* Vinyl record continuous rotation */
+@keyframes vinyl-spin {
   from {
-    transform: rotate(0deg);
+    transform: translate(-50%, -50%) rotate(0deg);
   }
   to {
-    transform: rotate(360deg);
+    transform: translate(-50%, -50%) rotate(360deg);
   }
 }
 
-@keyframes pulse {
-  0%, 100% {
-    transform: scaleY(0.4);
-  }
-  50% {
-    transform: scaleY(1);
-  }
+.vinyl-rotate {
+  animation: vinyl-spin 6s linear infinite;
 }
