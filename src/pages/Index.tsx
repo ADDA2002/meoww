@@ -36,8 +36,19 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
+      {/* Background GIF - Behind everything */}
+      <div className="absolute inset-0 z-0">
+        <img
+          src="/o6m.gif"
+          alt="Background"
+          className="w-full h-full object-cover opacity-100"
+        />
+        {/* Subtle white tint overlay for readability */}
+        <div className="absolute inset-0 bg-white/40"></div>
+      </div>
+
       {/* Header Bar */}
-      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
+      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20 bg-white/80 backdrop-blur-sm">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 bg-black"></div>
           <span className="font-bold tracking-wider text-sm uppercase">Jam Session</span>
@@ -170,15 +181,15 @@ const Index = () => {
 
           {/* Quick info feature card */}
           <div className="mt-8 grid grid-cols-3 gap-2 text-center text-xs text-gray-600 font-mono">
-            <div className="p-3 border border-gray-200 bg-gray-50">
+            <div className="p-3 border border-gray-200 bg-white/80 backdrop-blur-sm">
               <span className="font-bold text-black block mb-1">01. SYNC</span>
               Exact track time alignment
             </div>
-            <div className="p-3 border border-gray-200 bg-gray-50">
+            <div className="p-3 border border-gray-200 bg-white/80 backdrop-blur-sm">
               <span className="font-bold text-black block mb-1">02. CO-OP</span>
               Both can add songs & reorder
             </div>
-            <div className="p-3 border border-gray-200 bg-gray-50">
+            <div className="p-3 border border-gray-200 bg-white/80 backdrop-blur-sm">
               <span className="font-bold text-black block mb-1">03. FREE</span>
               No ads, 0 data stored
             </div>
@@ -187,7 +198,7 @@ const Index = () => {
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
+      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20 bg-white/80 backdrop-blur-sm">
         Jam Together &bull; Monochromatic Audio Streamer
       </footer>
     </div>
