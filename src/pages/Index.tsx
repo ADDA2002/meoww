@@ -75,7 +75,7 @@ const Index = () => {
                 }`}
               >
                 <span>Create Room</span>
-                <ChevronDown className={`h-4 w-4 transition-transform duration-300 ${activeTab === "create" ? "rotate-180" : ""}`} />
+                <ChevronDown className={`h-4 w-4 transition-transform duration-1000 ${activeTab === "create" ? "rotate-180" : ""}`} />
               </button>
 
               {/* Join Room Tab */}
@@ -87,7 +87,7 @@ const Index = () => {
                 }`}
               >
                 <span>Join Room</span>
-                <ChevronDown className={`h-4 w-4 transition-transform duration-300 ${activeTab === "join" ? "rotate-180" : ""}`} />
+                <ChevronDown className={`h-4 w-4 transition-transform duration-1000 ${activeTab === "join" ? "rotate-180" : ""}`} />
               </button>
             </div>
 
@@ -95,7 +95,7 @@ const Index = () => {
             <div className="relative overflow-hidden">
               {/* Create Room Drawer */}
               <div 
-                className={`transition-all duration-500 ease-in-out ${
+                className={`transition-all duration-1000 ease-in-out ${
                   activeTab === "create" ? "max-h-[300px] opacity-100" : "max-h-0 opacity-0 overflow-hidden"
                 }`}
               >
@@ -129,7 +129,7 @@ const Index = () => {
 
               {/* Join Room Drawer */}
               <div 
-                className={`transition-all duration-500 ease-in-out ${
+                className={`transition-all duration-1000 ease-in-out ${
                   activeTab === "join" ? "max-h-[350px] opacity-100" : "max-h-0 opacity-0 overflow-hidden"
                 }`}
               >
