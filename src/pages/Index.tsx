@@ -52,7 +52,12 @@ const Index = () => {
       <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
         <div className="w-full max-w-xl">
           {/* Hero text */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-6">
+            <img
+              src="/1kLR.gif"
+              alt="Jam mascot"
+              className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-4"
+            />
             <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
               Jam Together
             </h1>
