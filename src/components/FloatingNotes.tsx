@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 
 const musicSymbols = ["♪", "♫", "♩", "♬"];
+const noteSizes = ["text-lg", "text-xl", "text-2xl", "text-3xl", "text-4xl"];
 
 interface Note {
   id: number;
   symbol: string;
+  size: string;
   left: number;
   delay: number;
+  duration: number;
 }
 
 export const FloatingNotes = () => {
@@ -17,9 +20,11 @@ export const FloatingNotes = () => {
     const newNote: Note = {
       id: noteId,
       symbol: musicSymbols[Math.floor(Math.random() * musicSymbols.length)],
-      // Position around the bottom-right area where Join Room is
-      left: 55 + Math.random() * 15, // 55-70% from left
-      delay: Math.random() * 0.5,
+      size: noteSizes[Math.floor(Math.random() * noteSizes.length)],
+      // Position behind the Join Room tab (right side of the tab strip)
+      left: 50 + Math.random() * 20, // 50-70% from left
+      delay: Math.random() * 1,
+      duration: 2 + Math.random() * 2, // 2-4 seconds duration
     };
     setNoteId((prev) => prev + 1);
     setNotes((prev) => [...prev, newNote]);
@@ -27,15 +32,15 @@ export const FloatingNotes = () => {
     // Remove note after animation completes
     setTimeout(() => {
       setNotes((prev) => prev.filter((n) => n.id !== newNote.id));
-    }, 3000);
+    }, newNote.duration * 1000 + 500);
   }, [noteId]);
 
   useEffect(() => {
     // Spawn initial note
-    const timeout = setTimeout(spawnNote, 500);
+    const timeout = setTimeout(spawnNote, 300);
 
     // Continue spawning notes periodically
-    const interval = setInterval(spawnNote, 2000);
+    const interval = setInterval(spawnNote, 1500);
 
     return () => {
       clearTimeout(timeout);
@@ -48,11 +53,12 @@ export const FloatingNotes = () => {
       {notes.map((note) => (
         <div
           key={note.id}
-          className="absolute text-2xl font-bold text-black/20 floating-note"
+          className={`absolute font-bold text-black/15 floating-note ${note.size}`}
           style={{
-            bottom: "120px",
+            bottom: "45%", // Start from behind the tabs area
             left: `${note.left}%`,
             animationDelay: `${note.delay}s`,
+            animationDuration: `${note.duration}s`,
           }}
         >
           {note.symbol}
