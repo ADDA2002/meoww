@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronDown, Radio } from "lucide-react";
+import { ChevronDown, Radio, Music2, Headphones } from "lucide-react";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -36,18 +36,6 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
-      {/* Animated background gradient */}
-      <div className="absolute inset-0 animated-bg pointer-events-none"></div>
-
-      {/* Floating musical notes */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="floating-note absolute text-2xl text-black/5" style={{ left: "10%", top: "20%", animationDelay: "0s" }}>♪</div>
-        <div className="floating-note absolute text-3xl text-black/5" style={{ left: "85%", top: "15%", animationDelay: "1.5s" }}>♫</div>
-        <div className="floating-note absolute text-2xl text-black/5" style={{ left: "20%", top: "70%", animationDelay: "3s" }}>♬</div>
-        <div className="floating-note absolute text-4xl text-black/5" style={{ left: "75%", top: "65%", animationDelay: "4.5s" }}>♪</div>
-        <div className="floating-note absolute text-2xl text-black/5" style={{ left: "50%", top: "40%", animationDelay: "2s" }}>♫</div>
-      </div>
-
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
         <div className="flex items-center gap-2">
@@ -63,8 +51,8 @@ const Index = () => {
       {/* Main Container */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
         <div className="w-full max-w-xl">
-          {/* Hero text */}
-          <div className="text-center mb-6">
+          {/* Hero text with 3D entrance animation */}
+          <div className="text-center mb-6 hero-entrance">
             <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
               Jam Together
             </h1>
@@ -74,7 +62,7 @@ const Index = () => {
           </div>
 
           {/* Tab Strip + Curtain Drawers */}
-          <div className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+          <div className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] card-rise">
             <div className="flex border-b border-black">
               {/* Create Room Tab */}
               <button
@@ -84,6 +72,7 @@ const Index = () => {
                   activeTab === "create" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
               >
+                <Music2 className="w-4 h-4" />
                 <span>Create Room</span>
                 <ChevronDown className={`h-4 w-4 transition-transform duration-300 ${activeTab === "create" ? "rotate-180" : ""}`} />
               </button>
@@ -96,6 +85,7 @@ const Index = () => {
                   activeTab === "join" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
               >
+                <Headphones className="w-4 h-4" />
                 <span>Join Room</span>
                 <ChevronDown className={`h-4 w-4 transition-transform duration-300 ${activeTab === "join" ? "rotate-180" : ""}`} />
               </button>
