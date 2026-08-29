@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,42 +15,88 @@ const generateRandomCode = () => {
   ).join("");
 };
 
-// Animated cycling placeholder for room codes
+// Single spinning digit component
+const SpinningDigit = ({ char, direction }: { char: string; direction: "up" | "down" }) => {
+  const [displayChar, setDisplayChar] = useState(char);
+  const [isSpinning, setIsSpinning] = useState(false);
+  const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    // Start spinning animation
+    setIsSpinning(true);
+    
+    // Spin through random characters
+    const spinDuration = 800 + Math.random() * 400; // 800-1200ms
+    const intervalSpeed = 50; // How fast characters change
+    
+    animationRef.current = setInterval(() => {
+      setDisplayChar(ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]);
+    }, intervalSpeed);
+
+    // Stop spinning and show final character
+    setTimeout(() => {
+      if (animationRef.current) {
+        clearInterval(animationRef.current);
+        animationRef.current = null;
+      }
+      setDisplayChar(char);
+      setIsSpinning(false);
+    }, spinDuration);
+
+    return () => {
+      if (animationRef.current) {
+        clearInterval(animationRef.current);
+      }
+    };
+  }, [char]);
+
+  return (
+    <span
+      className={`inline-block w-4 text-center transition-transform duration-75 ${
+        isSpinning ? "opacity-40" : "opacity-100"
+      }`}
+      style={{
+        transform: isSpinning 
+          ? direction === "up" 
+            ? "translateY(-100%)" 
+            : "translateY(100%)"
+          : "translateY(0)",
+      }}
+    >
+      {displayChar}
+    </span>
+  );
+};
+
+// Animated cycling placeholder for room codes - slot machine style
 const CyclingCodePlaceholder = () => {
-  const [displayCode, setDisplayCode] = useState(generateRandomCode());
-  const [isVisible, setIsVisible] = useState(true);
+  const [codes, setCodes] = useState<string[]>(() => [generateRandomCode(), generateRandomCode()]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [directions, setDirections] = useState<("up" | "down")[]>(() => 
+    Array.from({ length: 6 }, () => Math.random() > 0.5 ? "up" : "down")
+  );
 
   useEffect(() => {
     const interval = setInterval(() => {
-      // Fade out
-      setIsVisible(false);
-
-      // After fade out, change code and fade in
-      setTimeout(() => {
-        setDisplayCode(generateRandomCode());
-        setIsVisible(true);
-      }, 400);
-    }, 2000);
+      // Generate new code
+      const newCode = generateRandomCode();
+      // Randomize directions for each digit
+      const newDirections = Array.from({ length: 6 }, () => Math.random() > 0.5 ? "up" : "down") as ("up" | "down")[];
+      
+      setCodes(prev => [prev[1], newCode]);
+      setDirections(newDirections);
+      setCurrentIndex(prev => (prev + 1) % 2);
+    }, 2500);
 
     return () => clearInterval(interval);
   }, []);
 
+  const currentCode = codes[currentIndex];
+
   return (
-    <span
-      className={`inline-block transition-all duration-300 ${
-        isVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
-      }`}
-    >
-      {displayCode.split("").map((char, i) => (
-        <span
-          key={i}
-          className="inline-block"
-          style={{
-            animationDelay: `${i * 0.05}s`,
-          }}
-        >
-          {char}
-        </span>
+    <span className="inline-block">
+      {currentCode.split("").map((char, i) => (
+        <SpinningDigit key={i} char={char} direction={directions[i]} />
       ))}
     </span>
   );
@@ -143,7 +189,7 @@ const Index = () => {
     }
 
     if (!isValidCodeFormat(cleanCode)) {
-      setJoinError("Invalid room code format. Room codes are 6 letters/numbers (e.g. X9KJ2B).");
+      setJoinError("Invalid room code format. Room codes are 6 letters/numbers.");
       return;
     }
 
@@ -286,7 +332,7 @@ const Index = () => {
                       />
                       {/* Animated placeholder overlay */}
                       {!joinCode && (
-                        <div className="absolute inset-0 flex items-center pl-3 pointer-events-none">
+                        <div className="absolute inset-0 flex items-center pl-3 pointer-events-none overflow-hidden">
                           <span className="text-gray-400 font-mono tracking-widest text-sm">
                             <CyclingCodePlaceholder />
                           </span>
