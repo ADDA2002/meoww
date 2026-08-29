@@ -116,16 +116,17 @@ const Room = () => {
       return baseName;
     }
     
-    // Try adding numbers at the back with a single space until we find a unique one
+    // Try adding numbers at the end with a space until we find a unique one
+    // e.g., "Alex" becomes "Alex 1", "Alex 2", etc.
     for (let i = 1; i <= 999; i++) {
-      const candidate = `${baseName} ${i}`;
+      const candidate = baseName + " " + i;
       if (!existingNames.includes(candidate.toLowerCase())) {
         return candidate;
       }
     }
     
     // Fallback: add timestamp suffix
-    return `${baseName} ${Date.now()}`;
+    return baseName + " " + Date.now();
   };
 
   // 1. Initialize PeerJS connection
