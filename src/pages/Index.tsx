@@ -61,16 +61,11 @@ const Index = () => {
             </p>
           </div>
 
-          {/* Cat GIF attached to top of the tab strip */}
-          <div className="overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-            <img
-              src="/1kLR.gif"
-              alt="Cat mascot"
-              className={`w-full object-contain transition-all duration-500 ${
-                activeTab ? "h-16 sm:h-20" : "h-20 sm:h-24"
-              }`}
-            />
-            <div className="flex border-t border-black">
+          {/* Tab Strip + Curtain Drawers */}
+          <div 
+            className={`border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all duration-300`}
+          >
+            <div className="flex border-b border-black">
               {/* Create Room Tab */}
               <button
                 type="button"
