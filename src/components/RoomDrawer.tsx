@@ -34,9 +34,9 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
+          className="hover:bg-gray-100 text-xs font-mono font-semibold p-2"
           aria-label="Open room options"
         >
           <Menu className="w-4 h-4" />
