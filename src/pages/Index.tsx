@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
 import Peer from "peerjs";
+import { formatDisplayName } from "@/lib/nameFormat";
 
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -185,8 +186,9 @@ const Index = () => {
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
     if (!createName.trim()) return;
+    const formattedName = formatDisplayName(createName);
     const generatedCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    navigate(`/room/${generatedCode}?name=${encodeURIComponent(createName.trim())}&host=true`);
+    navigate(`/room/${generatedCode}?name=${encodeURIComponent(formattedName)}&host=true`);
   };
 
   const handleJoinRoom = async (e: React.FormEvent) => {
@@ -214,7 +216,8 @@ const Index = () => {
         setIsCheckingRoom(false);
         return;
       }
-      navigate(`/room/${cleanCode}?name=${encodeURIComponent(joinName.trim())}&host=false`);
+      const formattedName = formatDisplayName(joinName);
+      navigate(`/room/${cleanCode}?name=${encodeURIComponent(formattedName)}&host=false`);
     } catch (err) {
       setJoinError("Couldn't verify the room. Check your connection and try again.");
       setIsCheckingRoom(false);

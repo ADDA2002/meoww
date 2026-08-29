@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
+import { formatDisplayName } from "@/lib/nameFormat";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -46,7 +47,7 @@ const Room = () => {
   const navigate = useNavigate();
 
   const roomCode = (code || "").toUpperCase();
-  const initialName = searchParams.get("name") || "Guest";
+  const initialName = formatDisplayName(searchParams.get("name") || "Guest");
   const initialIsHost = searchParams.get("host") === "true";
 
   // Peer & connection states
@@ -108,6 +109,7 @@ const Room = () => {
 
   // Generate a unique name by adding a number suffix with a space if there's a conflict
   const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
+    // Always store the comparison name in formatted form (first capital, rest lowercase)
     const normalizedBase = baseName.trim().toLowerCase();
     const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
     
