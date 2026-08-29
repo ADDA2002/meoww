@@ -39,7 +39,7 @@ const Index = () => {
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-black"></div>
+          <img src="/1kLR.gif" alt="Jam Together" className="w-8 h-8" />
           <span className="font-bold tracking-wider text-sm uppercase">Jam Session</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
@@ -184,6 +184,11 @@ const Index = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Bottom cat decoration */}
+      <div className="flex justify-center pb-4 relative z-20">
+        <img src="/cat.gif" alt="Cat" className="w-20 h-20 object-contain" />
       </div>
 
       {/* Footer */}
