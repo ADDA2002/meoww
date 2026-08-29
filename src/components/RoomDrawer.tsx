@@ -1,11 +1,12 @@
 import React from "react";
-import { Menu, Copy, Check, LogOut } from "lucide-react";
+import { Menu, Copy, Check, LogOut, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
+  SheetClose,
   SheetTrigger,
 } from "@/components/ui/sheet";
 
@@ -43,8 +44,11 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
         </Button>
       </SheetTrigger>
       <SheetContent className="border-l border-black bg-white text-black rounded-none p-0">
-        <SheetHeader className="border-b border-gray-200 p-4 text-left">
+        <SheetHeader className="border-b border-gray-200 p-4 text-left flex-row items-center justify-between">
           <SheetTitle className="text-lg font-bold uppercase tracking-tight">Room Options</SheetTitle>
+          <SheetClose className="p-1 hover:bg-gray-100 transition-colors rounded-sm">
+            <X className="w-5 h-5" />
+          </SheetClose>
         </SheetHeader>
         
         <div className="p-4 space-y-6">
