@@ -57,13 +57,6 @@ const Index = () => {
         <div className="w-full max-w-xl">
           {/* Hero text */}
           <div className="text-center mb-8">
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
-              Meoww Together
-            </h1>
-            <p className="text-gray-600 text-sm max-w-md mx-auto mb-6">
-              Synchronized listening rooms for two.
-            </p>
-
             {/* ASCII Cat Face */}
             <pre
               aria-label="ASCII cat face"
