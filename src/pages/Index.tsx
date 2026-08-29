@@ -114,6 +114,107 @@ const CyclingCodePlaceholder = () => {
   );
 };
 
+// Animated "Meoww" logo text with slot machine spin effect
+const AnimatedLogo = () => {
+  const TARGET = "Meoww";
+  const SPINNING_CHARS = "wWvVuUsS";
+
+  return (
+    <div className="flex items-center gap-2">
+      <img
+        src="/logo.gif"
+        alt="Meoww Logo"
+        className="w-8 h-8 object-contain"
+      />
+      <span className="font-extrabold tracking-wider text-lg uppercase relative overflow-hidden inline-flex">
+        {/* Static "Meo" */}
+        <span className="relative z-10">Meo</span>
+        
+        {/* Spinning "w" characters */}
+        {TARGET.slice(3).split("").map((char, i) => {
+          const delay = i * 150; // Stagger each w
+          return (
+            <SpinningLetter key={i} char={char} delay={delay} spinningChars={SPINNING_CHARS} />
+          );
+        })}
+      </span>
+    </div>
+  );
+};
+
+// Single spinning letter component for the logo
+const SpinningLetter = ({ char, delay, spinningChars }: { char: string; delay: number; spinningChars: string }) => {
+  const [displayChar, setDisplayChar] = useState(char);
+  const [isSpinning, setIsSpinning] = useState(false);
+  const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFirstRun = useRef(true);
+
+  useEffect(() => {
+    // Only spin on initial mount and periodically
+    const spinSequence = () => {
+      // Randomly decide to spin (every 3-5 seconds)
+      const nextSpinDelay = 3000 + Math.random() * 2000;
+      
+      const startTimeout = setTimeout(() => {
+        setIsSpinning(true);
+        
+        const spinDuration = 1000 + Math.random() * 500;
+        const intervalSpeed = 100;
+        
+        animationRef.current = setInterval(() => {
+          setDisplayChar(spinningChars[Math.floor(Math.random() * spinningChars.length)]);
+        }, intervalSpeed);
+
+        timeoutRef.current = setTimeout(() => {
+          if (animationRef.current) {
+            clearInterval(animationRef.current);
+            animationRef.current = null;
+          }
+          setDisplayChar(char);
+          setIsSpinning(false);
+          
+          // Schedule next spin
+          spinSequence();
+        }, spinDuration);
+      }, isFirstRun.current ? delay : nextSpinDelay);
+
+      if (isFirstRun.current) {
+        isFirstRun.current = false;
+      }
+
+      return startTimeout;
+    };
+
+    const cleanup = spinSequence();
+
+    return () => {
+      if (typeof cleanup === 'number') {
+        clearTimeout(cleanup);
+      }
+      if (animationRef.current) {
+        clearInterval(animationRef.current);
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [char, delay, spinningChars]);
+
+  return (
+    <span
+      className={`inline-block relative transition-all duration-200 ${
+        isSpinning ? "opacity-40" : "opacity-100"
+      }`}
+      style={{
+        transform: isSpinning ? "translateY(-50%)" : "translateY(0)",
+      }}
+    >
+      {displayChar}
+    </span>
+  );
+};
+
 const Index = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"create" | "join" | null>(null);
@@ -225,14 +326,7 @@ const Index = () => {
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
-        <div className="flex items-center gap-2">
-          <img
-            src="/logo.gif"
-            alt="Meoww Logo"
-            className="w-8 h-8 object-contain"
-          />
-          <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
-        </div>
+        <AnimatedLogo />
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
           <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
           <span>SYNCED FOR 2</span>
