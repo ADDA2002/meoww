@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
+import MonoFrame from "@/components/MonoFrame";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -42,9 +43,14 @@ const Index = () => {
           <div className="w-3 h-3 bg-black"></div>
           <span className="font-bold tracking-wider text-sm uppercase">Jam Session</span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
-          <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
-          <span>REALTIME P2P AUDIO</span>
+        <div className="flex items-center gap-4">
+          <div className="hidden sm:block">
+            <MonoFrame size="sm" showControls={false} />
+          </div>
+          <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
+            <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
+            <span>REALTIME P2P AUDIO</span>
+          </div>
         </div>
       </header>
 
