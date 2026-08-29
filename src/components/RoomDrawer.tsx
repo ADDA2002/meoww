@@ -51,15 +51,14 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
           {/* Room Code Section */}
           <div className="space-y-3">
             <div className="text-xs font-mono uppercase text-gray-500 tracking-wider">Room Code</div>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 bg-gray-100 border border-gray-300 px-3 py-2.5 font-mono font-bold text-lg tracking-widest text-center">
+            <div className="flex items-stretch gap-2">
+              <div className="flex-1 bg-gray-100 border border-gray-300 h-11 flex items-center justify-center font-mono font-bold text-lg tracking-widest text-black">
                 {roomCode}
               </div>
               <Button
                 onClick={handleCopyCode}
                 variant="outline"
-                size="sm"
-                className="border-black hover:bg-gray-100 font-mono text-xs"
+                className="h-11 border-black hover:bg-gray-100 font-mono text-xs font-semibold px-4"
               >
                 {copied ? (
                   <>
@@ -79,7 +78,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
           {/* User Info */}
           <div className="space-y-2">
             <div className="text-xs font-mono uppercase text-gray-500 tracking-wider">Connected As</div>
-            <div className="bg-gray-100 border border-gray-300 px-3 py-2.5 font-semibold">
+            <div className="bg-gray-100 border border-gray-300 h-11 flex items-center px-3 font-semibold">
               {userName}
             </div>
           </div>
