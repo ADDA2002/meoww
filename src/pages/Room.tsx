@@ -654,11 +654,6 @@ const Room = () => {
             />
             <span className="font-extrabold tracking-wider text-sm uppercase">Meoww</span>
           </div>
-          <span className="text-gray-300">/</span>
-          <div className="flex items-center gap-1.5 font-mono text-xs font-bold bg-gray-100 px-2 py-1 border border-gray-300">
-            <span>ROOM:</span>
-            <span className="tracking-widest text-black">{roomCode}</span>
-          </div>
         </div>
 
         <div className="flex items-center gap-2">
