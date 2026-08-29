@@ -16,44 +16,51 @@ const generateRandomCode = () => {
 };
 
 // Single spinning digit component
-const SpinningDigit = ({ char, direction }: { char: string; direction: "up" | "down" }) => {
+const SpinningDigit = ({ char, direction, delay }: { char: string; direction: "up" | "down"; delay: number }) => {
   const [displayChar, setDisplayChar] = useState(char);
   const [isSpinning, setIsSpinning] = useState(false);
   const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Start spinning animation
-    setIsSpinning(true);
-    
-    // Spin through random characters
-    const spinDuration = 800 + Math.random() * 400; // 800-1200ms
-    const intervalSpeed = 50; // How fast characters change
-    
-    animationRef.current = setInterval(() => {
-      setDisplayChar(ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]);
-    }, intervalSpeed);
+    // Wait for this digit's individual delay before starting to spin
+    const startTimeout = setTimeout(() => {
+      setIsSpinning(true);
+      
+      // Spin through random characters slowly
+      const spinDuration = 1500 + Math.random() * 500; // 1500-2000ms (slower)
+      const intervalSpeed = 150; // How fast characters change (slower)
+      
+      animationRef.current = setInterval(() => {
+        setDisplayChar(ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]);
+      }, intervalSpeed);
 
-    // Stop spinning and show final character
-    setTimeout(() => {
-      if (animationRef.current) {
-        clearInterval(animationRef.current);
-        animationRef.current = null;
-      }
-      setDisplayChar(char);
-      setIsSpinning(false);
-    }, spinDuration);
+      // Stop spinning and show final character
+      timeoutRef.current = setTimeout(() => {
+        if (animationRef.current) {
+          clearInterval(animationRef.current);
+          animationRef.current = null;
+        }
+        setDisplayChar(char);
+        setIsSpinning(false);
+      }, spinDuration);
+    }, delay);
 
     return () => {
+      clearTimeout(startTimeout);
       if (animationRef.current) {
         clearInterval(animationRef.current);
       }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
     };
-  }, [char]);
+  }, [char, delay]);
 
   return (
     <span
-      className={`inline-block w-4 text-center transition-transform duration-75 ${
-        isSpinning ? "opacity-40" : "opacity-100"
+      className={`inline-block w-4 text-center transition-all duration-300 ${
+        isSpinning ? "opacity-50" : "opacity-100"
       }`}
       style={{
         transform: isSpinning 
@@ -86,7 +93,7 @@ const CyclingCodePlaceholder = () => {
       setCodes(prev => [prev[1], newCode]);
       setDirections(newDirections);
       setCurrentIndex(prev => (prev + 1) % 2);
-    }, 2500);
+    }, 4000);
 
     return () => clearInterval(interval);
   }, []);
@@ -96,7 +103,12 @@ const CyclingCodePlaceholder = () => {
   return (
     <span className="inline-block">
       {currentCode.split("").map((char, i) => (
-        <SpinningDigit key={i} char={char} direction={directions[i]} />
+        <SpinningDigit 
+          key={i} 
+          char={char} 
+          direction={directions[i]} 
+          delay={i * 200} // Each digit starts 200ms after the previous
+        />
       ))}
     </span>
   );
