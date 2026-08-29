@@ -6,16 +6,16 @@
   }
   100% {
     opacity: 0;
-    transform: translateY(-6px) scale(0.995);
-    filter: blur(2px);
+    transform: translateY(-4px) scale(0.998);
+    filter: blur(1px);
   }
 }
 
 @keyframes drawer-enter {
   0% {
     opacity: 0;
-    transform: translateY(8px) scale(0.995);
-    filter: blur(2px);
+    transform: translateY(6px) scale(0.998);
+    filter: blur(1px);
   }
   100% {
     opacity: 1;
@@ -25,11 +25,11 @@
 }
 
 .drawer-leave {
-  animation: drawer-leave 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: drawer-leave 150ms cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 
 .drawer-enter {
-  animation: drawer-enter 300ms cubic-bezier(0, 0, 0.2, 1) forwards;
+  animation: drawer-enter 200ms cubic-bezier(0, 0, 0.2, 1) forwards;
 }
 
 .drawer-idle {
@@ -39,13 +39,13 @@
 }
 
 .drawer-content {
-  animation: drawer-content-in 300ms cubic-bezier(0, 0, 0.2, 1) 50ms both;
+  animation: drawer-content-in 200ms cubic-bezier(0, 0, 0.2, 1) 50ms both;
 }
 
 @keyframes drawer-content-in {
   0% {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(3px);
   }
   100% {
     opacity: 1;
@@ -54,5 +54,5 @@
 }
 
 .drawer-sheen {
-  animation: drawer-sheen 600ms ease-in-out 100ms 1;
+  animation: drawer-sheen 400ms ease-in-out 50ms 1;
 }
