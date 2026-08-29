@@ -115,13 +115,14 @@ const FloatingBubbles = () => {
           type="button"
           onClick={() => burstBubble(b)}
           aria-label="Burst bubble"
-          className="absolute rounded-full pointer-events-auto cursor-pointer transition-transform hover:scale-110 active:scale-95 focus:outline-none"
+          className="absolute pointer-events-auto cursor-pointer transition-transform hover:scale-110 active:scale-95 focus:outline-none"
           style={{
             left: `${b.x}px`,
             top: `${b.y}px`,
             width: `${b.size}px`,
             height: `${b.size}px`,
             opacity: b.opacity,
+            borderRadius: "50%",
             background:
               "radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, rgba(220,235,255,0.5) 35%, rgba(180,210,240,0.25) 70%, rgba(150,190,230,0.15) 100%)",
             border: "1.5px solid rgba(180,210,240,0.6)",
@@ -133,12 +134,13 @@ const FloatingBubbles = () => {
         >
           {/* Highlight reflection */}
           <span
-            className="absolute rounded-full"
+            className="absolute"
             style={{
               left: "22%",
               top: "18%",
               width: "28%",
               height: "20%",
+              borderRadius: "50%",
               background: "radial-gradient(ellipse, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%)",
               filter: "blur(0.5px)",
             }}
@@ -152,24 +154,26 @@ const FloatingBubbles = () => {
         return (
           <React.Fragment key={burst.id}>
             <div
-              className="absolute rounded-full pointer-events-none"
+              className="absolute pointer-events-none"
               style={{
                 left: `${burst.x}px`,
                 top: `${burst.y}px`,
                 width: `${burst.size * (1 + progress * 1.5)}px`,
                 height: `${burst.size * (1 + progress * 1.5)}px`,
+                borderRadius: "50%",
                 border: `2px solid rgba(180,220,255,${(burst.life / burst.maxLife) * 0.7})`,
                 opacity: (burst.life / burst.maxLife) * 0.8,
                 transform: "translate(-50%, -50%)",
               }}
             />
             <div
-              className="absolute rounded-full pointer-events-none"
+              className="absolute pointer-events-none"
               style={{
                 left: `${burst.x}px`,
                 top: `${burst.y}px`,
                 width: `${burst.size * (1 + progress * 2.2)}px`,
                 height: `${burst.size * (1 + progress * 2.2)}px`,
+                borderRadius: "50%",
                 border: `1.5px solid rgba(200,230,255,${(burst.life / burst.maxLife) * 0.4})`,
                 opacity: (burst.life / burst.maxLife) * 0.5,
                 transform: "translate(-50%, -50%)",
