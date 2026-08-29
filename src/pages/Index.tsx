@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio, Music2, Headphones } from "lucide-react";
+import AnimatedDrawer from "@/components/AnimatedDrawer";
 
 const Index = () => {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"create" | "join" | null>(null);
   const [createName, setCreateName] = useState("");
   const [joinName, setJoinName] = useState("");
@@ -18,20 +17,6 @@ const Index = () => {
     } else {
       setActiveTab(tab);
     }
-  };
-
-  const handleCreateRoom = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!createName.trim()) return;
-    const generatedCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    navigate(`/room/${generatedCode}?name=${encodeURIComponent(createName.trim())}&host=true`);
-  };
-
-  const handleJoinRoom = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!joinName.trim() || !joinCode.trim()) return;
-    const cleanCode = joinCode.trim().toUpperCase();
-    navigate(`/room/${cleanCode}?name=${encodeURIComponent(joinName.trim())}&host=false`);
   };
 
   return (
@@ -91,85 +76,17 @@ const Index = () => {
               </button>
             </div>
 
-            {/* Drawers Content */}
-            <div className="relative">
-              {/* Create Room Drawer */}
-              <div
-                className={`overflow-hidden transition-all duration-500 ease-out ${
-                  activeTab === "create" ? "max-h-[300px] opacity-100" : "max-h-0 opacity-0"
-                }`}
-              >
-                <div className="p-6">
-                  <form onSubmit={handleCreateRoom} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="create-name" className="text-xs font-mono uppercase text-gray-700">
-                        Your Nickname
-                      </Label>
-                      <Input
-                        id="create-name"
-                        value={createName}
-                        onChange={(e) => setCreateName(e.target.value)}
-                        placeholder="e.g. Alex"
-                        className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
-                        autoFocus
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
-                      disabled={!createName.trim()}
-                    >
-                      Start Session as Host
-                    </Button>
-                  </form>
-                </div>
-              </div>
-
-              {/* Join Room Drawer */}
-              <div
-                className={`overflow-hidden transition-all duration-500 ease-out ${
-                  activeTab === "join" ? "max-h-[350px] opacity-100" : "max-h-0 opacity-0"
-                }`}
-              >
-                <div className="p-6">
-                  <form onSubmit={handleJoinRoom} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="join-name" className="text-xs font-mono uppercase text-gray-700">
-                        Your Nickname
-                      </Label>
-                      <Input
-                        id="join-name"
-                        value={joinName}
-                        onChange={(e) => setJoinName(e.target.value)}
-                        placeholder="e.g. Taylor"
-                        className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="join-code" className="text-xs font-mono uppercase text-gray-700">
-                        6-Letter Room Code
-                      </Label>
-                      <Input
-                        id="join-code"
-                        value={joinCode}
-                        onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                        placeholder="e.g. X9KJ2B"
-                        maxLength={8}
-                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold"
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
-                      disabled={!joinName.trim() || !joinCode.trim()}
-                    >
-                      Join Session
-                    </Button>
-                  </form>
-                </div>
-              </div>
-            </div>
+            {/* Animated Drawer */}
+            <AnimatedDrawer
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              createName={createName}
+              setCreateName={setCreateName}
+              joinName={joinName}
+              setJoinName={setJoinName}
+              joinCode={joinCode}
+              setJoinCode={setJoinCode}
+            />
           </div>
 
           {/* Quick info feature cards with card-rise entry animation */}
