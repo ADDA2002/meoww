@@ -107,7 +107,7 @@ const CyclingCodePlaceholder = () => {
           key={i} 
           char={char} 
           direction={directions[i]} 
-          delay={i * 200} // Each digit starts 200ms after the previous
+          delay={i * 200}
         />
       ))}
     </span>
@@ -231,6 +231,7 @@ const Index = () => {
             alt="Meoww Logo"
             className="w-8 h-8 object-contain"
           />
+          <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
           <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
