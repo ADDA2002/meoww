@@ -41,7 +41,7 @@ const Index = () => {
         <div className="flex items-center gap-2">
           <img
             src="/logo.gif"
-            alt="Meoww Together Logo"
+            alt="Meoww Logo"
             className="w-8 h-8 object-contain"
           />
         </div>
@@ -181,7 +181,7 @@ const Index = () => {
 
       {/* Footer */}
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
-        Meoww Together &bull; Monochromatic Audio Streamer
+        Meoww &bull; Monochromatic Audio Streamer
       </footer>
     </div>
   );

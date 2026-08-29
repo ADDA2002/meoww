@@ -559,10 +559,10 @@ const Room = () => {
           >
             <img
               src="/logo.gif"
-              alt="Meoww Together Logo"
+              alt="Meoww Logo"
               className="w-5 h-5 object-contain"
             />
-            <span className="font-extrabold tracking-wider text-sm uppercase">MEOWW TOGETHER</span>
+            <span className="font-extrabold tracking-wider text-sm uppercase">Meoww</span>
           </button>
           <span className="text-gray-300">/</span>
           <div className="flex items-center gap-1.5 font-mono text-xs font-bold bg-gray-100 px-2 py-1 border border-gray-300">
@@ -959,7 +959,7 @@ const Room = () => {
       {/* Bottom status strip */}
       <footer className="border-t border-black py-2.5 px-4 sm:px-8 flex justify-between items-center text-xs font-mono bg-white text-gray-600">
         <div>CONNECTED AS: <span className="font-bold text-black uppercase">{userName}</span></div>
-        <div>MEOWW TOGETHER &bull; LOW LATENCY SYNC</div>
+        <div>Meoww &bull; Low Latency Sync</div>
       </footer>
     </div>
   );
