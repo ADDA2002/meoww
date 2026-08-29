@@ -36,29 +36,26 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
   useEffect(() => {
     if (activeTab === prevTab.current) return;
 
-    // Clear any pending inner timer
     if (innerTimerRef.current) {
       clearTimeout(innerTimerRef.current);
       innerTimerRef.current = null;
     }
 
     if (activeTab === null) {
-      // closing: play leave
       setPhase("leaving");
       const t = setTimeout(() => {
         setDisplayed(null);
         setPhase("idle");
         prevTab.current = null;
-      }, 380);
+      }, 200);
       return () => clearTimeout(t);
     }
 
     if (displayed === null) {
-      // opening from closed
       setDisplayed(activeTab);
       setPhase("entering");
       prevTab.current = activeTab;
-      const t = setTimeout(() => setPhase("idle"), 700);
+      const t = setTimeout(() => setPhase("idle"), 300);
       return () => clearTimeout(t);
     }
 
@@ -68,14 +65,11 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
       setDisplayed(activeTab);
       setPhase("entering");
       prevTab.current = activeTab;
-      innerTimerRef.current = setTimeout(() => setPhase("idle"), 700);
-    }, 380);
-    return () => {
-      clearTimeout(t1);
-    };
+      innerTimerRef.current = setTimeout(() => setPhase("idle"), 300);
+    }, 200);
+    return () => clearTimeout(t1);
   }, [activeTab]);
 
-  // Clean up the inner timer on unmount
   useEffect(() => {
     return () => {
       if (innerTimerRef.current) {
@@ -100,12 +94,11 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
 
   return (
     <div
-      className={`grid transition-[grid-template-rows] duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+      className={`grid transition-[grid-template-rows] duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
         displayed ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
       }`}
     >
       <div className="overflow-hidden relative">
-        {/* Sliding panel */}
         <div
           key={displayed ?? "empty"}
           className={`relative will-change-transform ${
@@ -116,11 +109,6 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
               : "drawer-idle"
           }`}
         >
-          {/* Edge accents (top & bottom) */}
-          <div className="absolute left-0 right-0 -top-px h-px bg-gradient-to-r from-transparent via-black to-transparent drawer-edge" />
-          <div className="absolute left-0 right-0 -bottom-px h-px bg-gradient-to-r from-transparent via-black to-transparent drawer-edge" />
-
-          {/* Subtle moving sheen */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="drawer-sheen absolute -inset-y-2 -left-1/3 w-1/3 bg-gradient-to-r from-transparent via-black/[0.04] to-transparent" />
           </div>
