@@ -1,10 +1,60 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
 import Peer from "peerjs";
+
+const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+// Generate a random 6-character room code
+const generateRandomCode = () => {
+  return Array.from({ length: 6 }, () =>
+    ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]
+  ).join("");
+};
+
+// Animated cycling placeholder for room codes
+const CyclingCodePlaceholder = () => {
+  const [displayCode, setDisplayCode] = useState(generateRandomCode());
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Fade out
+      setIsVisible(false);
+
+      // After fade out, change code and fade in
+      setTimeout(() => {
+        setDisplayCode(generateRandomCode());
+        setIsVisible(true);
+      }, 400);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <span
+      className={`inline-block transition-all duration-300 ${
+        isVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
+      }`}
+    >
+      {displayCode.split("").map((char, i) => (
+        <span
+          key={i}
+          className="inline-block"
+          style={{
+            animationDelay: `${i * 0.05}s`,
+          }}
+        >
+          {char}
+        </span>
+      ))}
+    </span>
+  );
+};
 
 const Index = () => {
   const navigate = useNavigate();
@@ -222,17 +272,27 @@ const Index = () => {
                     <Label htmlFor="join-code" className="text-xs font-mono uppercase text-gray-700">
                       6-Letter Room Code
                     </Label>
-                    <Input
-                      id="join-code"
-                      value={joinCode}
-                      onChange={(e) => {
-                        setJoinCode(e.target.value.toUpperCase());
-                        setJoinError(null);
-                      }}
-                      placeholder="e.g. X9KJ2B"
-                      maxLength={6}
-                      className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold"
-                    />
+                    <div className="relative">
+                      <Input
+                        id="join-code"
+                        value={joinCode}
+                        onChange={(e) => {
+                          setJoinCode(e.target.value.toUpperCase());
+                          setJoinError(null);
+                        }}
+                        placeholder=""
+                        maxLength={6}
+                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold pr-12"
+                      />
+                      {/* Animated placeholder overlay */}
+                      {!joinCode && (
+                        <div className="absolute inset-0 flex items-center pl-3 pointer-events-none">
+                          <span className="text-gray-400 font-mono tracking-widest text-sm">
+                            <CyclingCodePlaceholder />
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {joinError && (
