@@ -2,204 +2,129 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const Index = () => {
-  const [activePanel, setActivePanel] = useState<"create" | "join" | null>(null);
+  const [slidePosition, setSlidePosition] = useState<"left" | "right">("left");
   const [createName, setCreateName] = useState("");
   const [joinName, setJoinName] = useState("");
   const [joinCode, setJoinCode] = useState("");
 
+  const handleSlide = (direction: "left" | "right") => {
+    setSlidePosition(direction);
+  };
+
   return (
-    <div className="min-h-screen bg-white text-black">
-      {/* Split Panel */}
-      <div className="relative max-w-2xl mx-auto mt-10 px-4">
-        <div className="flex h-20 overflow-hidden bg-white border border-gray-300 shadow-lg">
-          {/* Create Room Panel */}
-          <button
-            onClick={() => setActivePanel(activePanel === "create" ? null : "create")}
-            className={`flex-1 flex flex-col items-center justify-center gap-1 transition-all duration-500 hover:bg-gray-100 ${
-              activePanel === "create" ? "bg-gray-200" : ""
-            }`}
-          >
-            <span className="text-lg font-semibold text-black">Create Room</span>
-            <ChevronLeft
-              className={`h-5 w-5 text-gray-600 transition-all duration-500 ${
-                activePanel === "create" ? "translate-x-2 opacity-100" : "translate-x-0 opacity-0"
-              }`}
-            />
-            <ChevronRight
-              className={`h-5 w-5 text-gray-600 transition-all duration-500 ${
-                activePanel === "create" ? "translate-x-0 opacity-0" : "translate-x-2 opacity-100"
-              }`}
-            />
-          </button>
+    <div className="min-h-screen bg-white text-black flex flex-col">
+      {/* Main Container */}
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-black mb-2">Jam Together</h1>
+            <p className="text-gray-600">Listen in perfect sync with your partner</p>
+          </div>
 
-          {/* Divider */}
-          <div className="w-px bg-gray-300" />
+          {/* Split Rectangle with Sliding Glass */}
+          <div className="relative h-80 border border-gray-300 overflow-hidden">
+            {/* Left Side - Create Room */}
+            <div 
+              className="absolute left-0 top-0 w-1/2 h-full flex flex-col items-center justify-center cursor-pointer z-10"
+              onClick={() => handleSlide("left")}
+            >
+              <span className="text-xl font-semibold text-black">Create Room</span>
+              <span className="text-gray-500 text-sm mt-1">Set up a new session</span>
+            </div>
 
-          {/* Join Room Panel */}
-          <button
-            onClick={() => setActivePanel(activePanel === "join" ? null : "join")}
-            className={`flex-1 flex flex-col items-center justify-center gap-1 transition-all duration-500 hover:bg-gray-100 ${
-              activePanel === "join" ? "bg-gray-200" : ""
-            }`}
-          >
-            <span className="text-lg font-semibold text-black">Join Room</span>
-            <ChevronRight
-              className={`h-5 w-5 text-gray-600 transition-all duration-500 ${
-                activePanel === "join" ? "translate-x-2 opacity-100" : "translate-x-0 opacity-0"
-              }`}
-            />
-            <ChevronLeft
-              className={`h-5 w-5 text-gray-600 transition-all duration-500 ${
-                activePanel === "join" ? "translate-x-0 opacity-0" : "translate-x-2 opacity-100"
-              }`}
-            />
-          </button>
-        </div>
+            {/* Right Side - Join Room */}
+            <div 
+              className="absolute right-0 top-0 w-1/2 h-full flex flex-col items-center justify-center cursor-pointer z-10"
+              onClick={() => handleSlide("right")}
+            >
+              <span className="text-xl font-semibold text-black">Join Room</span>
+              <span className="text-gray-500 text-sm mt-1">Enter a room code</span>
+            </div>
 
-        {/* Sliding Content Under Panel */}
-        <div
-          className="overflow-hidden transition-all duration-500 ease-in-out"
-          style={{
-            maxHeight: activePanel ? "300px" : "0px",
-            opacity: activePanel ? 1 : 0,
-          }}
-        >
-          <div
-            className="bg-white/80 backdrop-blur-md border border-gray-300 border-t-0 p-6"
-            style={{
-              transform: activePanel === "create"
-                ? "translateX(0)"
-                : activePanel === "join"
-                ? "translateX(0)"
-                : "translateX(-20px)",
-            }}
-          >
-            {activePanel === "create" && (
-              <div className="space-y-4 animate-in fade-in slide-in-from-left duration-500">
-                <h3 className="text-xl font-semibold text-center mb-4 text-black">Create a Room</h3>
-                <div className="space-y-2">
-                  <Label className="text-gray-700">Your Name</Label>
-                  <Input
-                    value={createName}
-                    onChange={(e) => setCreateName(e.target.value)}
-                    placeholder="Enter your name..."
-                    className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
-                  />
+            {/* Sliding Glass Rectangle */}
+            <div 
+              className="absolute top-0 w-1/2 h-full glass-effect transition-transform duration-500 ease-in-out z-20 flex items-center justify-center"
+              style={{ 
+                transform: slidePosition === "left" ? "translateX(0)" : "translateX(100%)",
+                left: slidePosition === "left" ? "0" : "auto",
+                right: slidePosition === "right" ? "0" : "auto",
+              }}
+            >
+              {slidePosition === "left" ? (
+                <div className="w-full p-6 space-y-4">
+                  <h3 className="text-xl font-semibold text-center text-black mb-4">Create a Room</h3>
+                  <div className="space-y-2">
+                    <Label className="text-gray-700">Your Name</Label>
+                    <Input
+                      value={createName}
+                      onChange={(e) => setCreateName(e.target.value)}
+                      placeholder="Enter your name..."
+                      className="bg-white/80 border-gray-400 text-black placeholder-gray-500"
+                    />
+                  </div>
+                  <Button
+                    className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
+                    disabled={!createName.trim()}
+                  >
+                    Create Room
+                  </Button>
                 </div>
-                <Button
-                  className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
-                  disabled={!createName.trim()}
-                >
-                  Create Room
-                </Button>
-              </div>
-            )}
+              ) : (
+                <div className="w-full p-6 space-y-4">
+                  <h3 className="text-xl font-semibold text-center text-black mb-4">Join a Room</h3>
+                  <div className="space-y-2">
+                    <Label className="text-gray-700">Your Name</Label>
+                    <Input
+                      value={joinName}
+                      onChange={(e) => setJoinName(e.target.value)}
+                      placeholder="Enter your name..."
+                      className="bg-white/80 border-gray-400 text-black placeholder-gray-500"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-gray-700">Room Code</Label>
+                    <Input
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value)}
+                      placeholder="Enter room code..."
+                      className="bg-white/80 border-gray-400 text-black placeholder-gray-500"
+                    />
+                  </div>
+                  <Button
+                    className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
+                    disabled={!joinName.trim() || !joinCode.trim()}
+                  >
+                    Join Room
+                  </Button>
+                </div>
+              )}
+            </div>
 
-            {activePanel === "join" && (
-              <div className="space-y-4 animate-in fade-in slide-in-from-right duration-500">
-                <h3 className="text-xl font-semibold text-center mb-4 text-black">Join a Room</h3>
-                <div className="space-y-2">
-                  <Label className="text-gray-700">Your Name</Label>
-                  <Input
-                    value={joinName}
-                    onChange={(e) => setJoinName(e.target.value)}
-                    placeholder="Enter your name..."
-                    className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-gray-700">Room Code</Label>
-                  <Input
-                    value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value)}
-                    placeholder="Enter room code..."
-                    className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
-                  />
-                </div>
-                <Button
-                  className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
-                  disabled={!joinName.trim() || !joinCode.trim()}
-                >
-                  Join Room
-                </Button>
-              </div>
-            )}
+            {/* Center Divider */}
+            <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gray-300 z-30"></div>
+
+            {/* Navigation Arrows */}
+            <button 
+              className={`absolute top-1/2 -translate-y-1/2 z-40 p-2 bg-white border border-gray-300 hover:bg-gray-100 transition-colors ${slidePosition === "left" ? "right-2" : "left-2"}`}
+              onClick={() => handleSlide(slidePosition === "left" ? "right" : "left")}
+            >
+              {slidePosition === "left" ? (
+                <ChevronRight className="h-5 w-5 text-black" />
+              ) : (
+                <ChevronLeft className="h-5 w-5 text-black" />
+              )}
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Dropdown Drawers Below */}
-      <div className="max-w-2xl mx-auto mt-6 px-4 space-y-4">
-        <Accordion type="single" collapsible className="w-full">
-          <AccordionItem value="create-drawer" className="border border-gray-300 bg-white">
-            <AccordionTrigger className="text-black hover:text-gray-600 px-6 py-4 text-lg font-medium">
-              <span className="flex items-center gap-3">
-                <span className="text-2xl">🎵</span>
-                Create a Room
-              </span>
-            </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-gray-700">Your Name</Label>
-                  <Input
-                    placeholder="Enter your name..."
-                    className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
-                  />
-                </div>
-                <Button className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors">
-                  Create Room
-                </Button>
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-
-          <AccordionItem value="join-drawer" className="border border-gray-300 bg-white">
-            <AccordionTrigger className="text-black hover:text-gray-600 px-6 py-4 text-lg font-medium">
-              <span className="flex items-center gap-3">
-                <span className="text-2xl">🎧</span>
-                Join a Room
-              </span>
-            </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-gray-700">Your Name</Label>
-                  <Input
-                    placeholder="Enter your name..."
-                    className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-gray-700">Room Code</Label>
-                  <Input
-                    placeholder="Enter room code..."
-                    className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
-                  />
-                </div>
-                <Button className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors">
-                  Join Room
-                </Button>
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
-      </div>
-
       {/* Footer */}
-      <div className="text-center mt-16 pb-8">
-        <p className="text-gray-500 text-sm">
-          Jam Together — Listen in perfect sync
-        </p>
+      <div className="text-center py-6">
+        <p className="text-gray-500 text-sm">Jam Together</p>
       </div>
     </div>
   );
