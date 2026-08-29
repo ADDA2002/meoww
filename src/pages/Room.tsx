@@ -158,7 +158,7 @@ const Room = () => {
                 
                 <div className="flex items-center justify-center space-x-4">
                   <Button variant="ghost" onClick={handleSkipPrevious} size="icon" aria-label="Previous">
-                    <SkipPrevious className="h-5 w-5" />
+                    <SkipBack className="h-5 w-5" />
                   </Button>
                   
                   <Button 
@@ -174,7 +174,7 @@ const Room = () => {
                   </Button>
                   
                   <Button variant="ghost" onClick={handleSkipNext} size="icon" aria-label="Next">
-                    <SkipNext className="h-5 w-5" />
+                    <SkipForward className="h-5 w-5" />
                   </Button>
                 </div>
                 
