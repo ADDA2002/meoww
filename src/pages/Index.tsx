@@ -62,7 +62,7 @@ const Index = () => {
           </div>
 
           {/* Cat GIF attached to top of the tab strip */}
-          <div className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+          <div className="overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
             <img
               src="/1kLR.gif"
               alt="Cat mascot"
