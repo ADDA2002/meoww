@@ -114,60 +114,6 @@ const CyclingCodePlaceholder = () => {
   );
 };
 
-// Cat Paw SVG Component
-const CatPaw = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 100 100" className={className} fill="currentColor">
-    {/* Main pad */}
-    <ellipse cx="50" cy="65" rx="25" ry="20" />
-    {/* Top toe pads */}
-    <ellipse cx="25" cy="35" rx="10" ry="12" />
-    <ellipse cx="45" cy="25" rx="10" ry="12" />
-    <ellipse cx="65" cy="25" rx="10" ry="12" />
-    <ellipse cx="82" cy="38" rx="9" ry="11" />
-  </svg>
-);
-
-// Floating Cat Paw with fade animation
-const FloatingCatPaw = ({ style }: { style: React.CSSProperties }) => {
-  const [fadePhase, setFadePhase] = useState<"in" | "out">("in");
-  const [opacity, setOpacity] = useState(0);
-
-  useEffect(() => {
-    // Start with opacity 0
-    const fadeInTimeout = setTimeout(() => {
-      setFadePhase("in");
-      setOpacity(0.3);
-    }, 500);
-
-    return () => clearTimeout(fadeInTimeout);
-  }, []);
-
-  useEffect(() => {
-    if (fadePhase === "in") {
-      const timeout = setTimeout(() => {
-        setFadePhase("out");
-        setOpacity(0);
-      }, 2000);
-      return () => clearTimeout(timeout);
-    } else {
-      const timeout = setTimeout(() => {
-        setFadePhase("in");
-        setOpacity(0.3);
-      }, 3000);
-      return () => clearTimeout(timeout);
-    }
-  }, [fadePhase]);
-
-  return (
-    <div 
-      className="absolute pointer-events-none text-gray-300"
-      style={{ ...style, opacity }}
-    >
-      <CatPaw className="w-6 h-6" />
-    </div>
-  );
-};
-
 const Index = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"create" | "join" | null>(null);
@@ -275,29 +221,8 @@ const Index = () => {
     }
   };
 
-  // Cat paw positions around the header
-  const catPawPositions = [
-    { top: "8px", left: "90px", rotate: "-20deg" },
-    { top: "4px", left: "130px", rotate: "15deg" },
-    { top: "12px", right: "140px", rotate: "-10deg" },
-    { top: "6px", right: "100px", rotate: "25deg" },
-    { top: "20px", left: "160px", rotate: "5deg" },
-    { top: "18px", right: "170px", rotate: "-15deg" },
-  ];
-
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
-      {/* Floating Cat Paws Background */}
-      {catPawPositions.map((pos, i) => (
-        <FloatingCatPaw 
-          key={i} 
-          style={{ 
-            ...pos,
-            animationDelay: `${i * 0.5}s`
-          } as React.CSSProperties} 
-        />
-      ))}
-
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
         <div className="flex items-center gap-2">
