@@ -235,7 +235,7 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
           <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
-          <span>SYNCED FOR 2</span>
+          <span>SYNCED AUDIO PARTY</span>
         </div>
       </header>
 
