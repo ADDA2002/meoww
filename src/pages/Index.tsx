@@ -184,13 +184,12 @@ const Index = () => {
             </div>
           </div>
 
-          {/* GIF above footer - fixed sizing */}
-          <div className="mt-8 flex justify-center w-full">
+          {/* GIF above footer */}
+          <div className="mt-8 flex justify-center">
             <img 
               src="/o6m.gif" 
               alt="Jam Together" 
-              className="w-full max-w-2xl h-auto block"
-              style={{ minHeight: '200px' }}
+              className="max-w-full h-auto"
             />
           </div>
         </div>
