@@ -69,26 +69,3 @@
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
   }
 }
-
-/* Floating music notes animation - organic floating up */
-@keyframes float-up {
-  0% {
-    opacity: 0;
-    transform: translateY(0) rotate(-10deg) scale(0.8);
-  }
-  10% {
-    opacity: 0.15;
-  }
-  50% {
-    opacity: 0.2;
-    transform: translateY(-150px) rotate(5deg) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-400px) rotate(15deg) scale(0.9);
-  }
-}
-
-.floating-note {
-  animation: float-up ease-out forwards;
-}
