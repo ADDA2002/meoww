@@ -57,19 +57,32 @@ const Index = () => {
         <div className="w-full max-w-xl">
           {/* Hero text */}
           <div className="text-center mb-8">
-            {/* ASCII Cat Face */}
+            {/* Highly Detailed ASCII Cat Face */}
             <pre
-              aria-label="ASCII cat face"
-              className="inline-block font-mono text-black text-[10px] sm:text-xs leading-tight whitespace-pre select-none"
+              aria-label="Detailed ASCII cat face"
+              className="inline-block font-mono text-black text-[8px] sm:text-[10px] leading-[1.05] whitespace-pre select-none"
             >
-{`    /\\_____/\\
-   /  o   o  \\
-  ( ==  ^  == )
-   )         (
-  (           )
- ( (  )   (  ) )
-(__(__)___(__)__)
-  cat: ready  `}
+{`           ,     ,
+          /(     )\\
+         |  \\_/  |
+         |  |o o| |
+         |   _   |    /\\___/\\
+         |  (_)  |   / o   o \\
+         |       |  ( ==  ^  == )
+        /| | | | |\\  )        (
+       / | | | | | \\(          )
+      /  | | | | |  \\( (    ) ( )
+     |   | | | | |   |(|    |)|)|
+   _/|___|_|_|_|_|__/ |  w  | |/
+  | | | | | | | |   | |  __| |
+  | | | | | | | |   | | /   |
+  |_|_______|_______|_|/____|
+    | | | | | | | |   | |
+    | | | | | | | |   | |
+    | | | | | | | |   | |
+    ^^^^^^^^^^^^^^^^^^^^^
+        meoww together
+         "ready to jam"`}
             </pre>
           </div>
 
