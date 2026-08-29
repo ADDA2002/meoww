@@ -62,7 +62,6 @@ const Room = () => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
-  const [volume, setVolume] = useState<number>(0.8);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
@@ -662,72 +661,55 @@ const Room = () => {
             </div>
 
             {/* Controls Row */}
-            <div className="flex items-center justify-between pt-2">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsShuffle(!isShuffle)}
-                  className={`p-2 border border-black transition-colors ${
-                    isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
-                  }`}
-                  title="Toggle Shuffle"
-                >
-                  <Shuffle className="w-4 h-4" />
-                </button>
-              </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsShuffle(!isShuffle)}
+                className={`p-2 border border-black transition-colors ${
+                  isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
+                }`}
+                title="Toggle Shuffle"
+              >
+                <Shuffle className="w-4 h-4" />
+              </button>
 
-              {/* Central playback controls */}
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handlePrevious}
-                  className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
-                  title="Previous Song"
-                >
-                  <SkipBack className="w-5 h-5" />
-                </button>
+              <button
+                type="button"
+                onClick={handlePrevious}
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
+                title="Previous Song"
+              >
+                <SkipBack className="w-5 h-5" />
+              </button>
 
-                <button
-                  type="button"
-                  onClick={handleTogglePlay}
-                  className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors"
-                  title={isPlaying ? "Pause" : "Play"}
-                >
-                  {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
-                </button>
+              <button
+                type="button"
+                onClick={handleTogglePlay}
+                className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors"
+                title={isPlaying ? "Pause" : "Play"}
+              >
+                {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
+              </button>
 
-                <button
-                  type="button"
-                  onClick={handleNext}
-                  className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
-                  title="Next Song"
-                >
-                  <SkipForward className="w-5 h-5" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleNext}
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
+                title="Next Song"
+              >
+                <SkipForward className="w-5 h-5" />
+              </button>
 
-              {/* Volume Slider */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsMuted(!isMuted)}
-                  className="text-black hover:opacity-70"
-                >
-                  {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => {
-                    setVolume(parseFloat(e.target.value));
-                    setIsMuted(false);
-                  }}
-                  className="w-16 sm:w-20 accent-black cursor-pointer"
-                />
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsMuted(!isMuted)}
+                className={`p-2 border border-black transition-colors ${
+                  isMuted ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
+                }`}
+                title={isMuted ? "Unmute" : "Mute"}
+              >
+                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
             </div>
 
             {!isHost && (
