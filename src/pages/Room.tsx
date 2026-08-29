@@ -16,8 +16,7 @@ import {
   Music, 
   Upload, 
   Users,
-  AlertCircle,
-  Wifi
+  AlertCircle
 } from "lucide-react";
 import Peer, { DataConnection } from "peerjs";
 import { toast } from "sonner";
@@ -731,7 +730,6 @@ const Room = () => {
                 </span>
               </div>
               <div className="flex items-center gap-1 text-gray-500">
-                <Wifi className="w-3 h-3" />
                 <span>ping {ping}ms</span>
               </div>
             </div>
