@@ -9,55 +9,54 @@ const CreateRoom = () => {
 
   const handleCreateRoom = () => {
     if (roomName.trim()) {
-      // Generate a random room code
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
       setRoomCode(code);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-900 to-blue-950 text-white py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-white text-black py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md mx-auto space-y-8">
         <div className="text-center">
-          <h1 className="text-3xl font-bold mb-4">Create a Room</h1>
-          <p className="text-blue-200">Enter your room name to get started</p>
+          <h1 className="text-3xl font-bold mb-4 text-black">Create a Room</h1>
+          <p className="text-gray-600">Enter your room name to get started</p>
         </div>
 
         {!roomCode ? (
-          <div className="space-y-6 bg-blue-800/30 backdrop-blur-sm rounded-xl p-6 border border-blue-700/50">
+          <div className="space-y-6 bg-white border border-gray-300 p-6">
             <div className="space-y-2">
-              <Label htmlFor="room-name" className="text-blue-100">Room Name</Label>
+              <Label htmlFor="room-name" className="text-gray-700">Room Name</Label>
               <Input
                 id="room-name"
                 value={roomName}
                 onChange={(e) => setRoomName(e.target.value)}
                 placeholder="Enter room name..."
-                className="bg-blue-900/50 border-blue-600 text-white placeholder-blue-400"
+                className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
               />
             </div>
             <Button
               onClick={handleCreateRoom}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+              className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
               disabled={!roomName.trim()}
             >
               Create Room
             </Button>
           </div>
         ) : (
-          <div className="space-y-6 bg-blue-800/30 backdrop-blur-sm rounded-xl p-6 border border-blue-700/50">
+          <div className="space-y-6 bg-white border border-gray-300 p-6">
             <div className="text-center space-y-4">
-              <h2 className="text-2xl font-semibold">Room Created!</h2>
+              <h2 className="text-2xl font-semibold text-black">Room Created!</h2>
               <div className="space-y-2">
-                <p className="text-blue-200">Your room name:</p>
-                <p className="text-xl font-mono bg-blue-900/50 p-2 rounded border border-blue-600/50">
+                <p className="text-gray-600">Your room name:</p>
+                <p className="text-xl font-mono bg-gray-100 p-2 border border-gray-300 text-black">
                   {roomName}
                 </p>
-                <p className="text-blue-200">Room code:</p>
-                <p className="text-2xl font-bold font-mono bg-gradient-to-r from-blue-600 to-blue-400 p-3 rounded-lg border border-blue-500/50">
+                <p className="text-gray-600">Room code:</p>
+                <p className="text-2xl font-bold font-mono bg-black text-white p-3 border border-gray-400">
                   {roomCode}
                 </p>
               </div>
-              <p className="text-sm text-blue-300">
+              <p className="text-sm text-gray-500">
                 Share this code with your partner to join the room
               </p>
             </div>
@@ -66,7 +65,7 @@ const CreateRoom = () => {
                 navigator.clipboard.writeText(roomCode);
                 alert("Room code copied to clipboard!");
               }}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+              className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
             >
               Copy Room Code
             </Button>

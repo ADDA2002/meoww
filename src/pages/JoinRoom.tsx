@@ -11,9 +11,7 @@ const JoinRoom = () => {
   const handleJoinRoom = () => {
     if (userName.trim() && roomCode.trim()) {
       setIsJoining(true);
-      // Simulate joining room
       setTimeout(() => {
-        // In a real app, this would navigate to the room page
         alert(`Joined room ${roomCode} as ${userName}`);
         setIsJoining(false);
       }, 1000);
@@ -21,39 +19,39 @@ const JoinRoom = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-900 to-blue-950 text-white py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-white text-black py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md mx-auto space-y-8">
         <div className="text-center">
-          <h1 className="text-3xl font-bold mb-4">Join a Room</h1>
-          <p className="text-blue-200">Enter your name and the room code</p>
+          <h1 className="text-3xl font-bold mb-4 text-black">Join a Room</h1>
+          <p className="text-gray-600">Enter your name and the room code</p>
         </div>
 
-        <div className="space-y-6 bg-blue-800/30 backdrop-blur-sm rounded-xl p-6 border border-blue-700/50">
+        <div className="space-y-6 bg-white border border-gray-300 p-6">
           <div className="space-y-2">
-            <Label htmlFor="user-name" className="text-blue-100">Your Name</Label>
+            <Label htmlFor="user-name" className="text-gray-700">Your Name</Label>
             <Input
               id="user-name"
               value={userName}
               onChange={(e) => setUserName(e.target.value)}
               placeholder="Enter your name..."
-              className="bg-blue-900/50 border-blue-600 text-white placeholder-blue-400"
+              className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="join-room-code" className="text-blue-100">Room Code</Label>
+            <Label htmlFor="join-room-code" className="text-gray-700">Room Code</Label>
             <Input
               id="join-room-code"
               value={roomCode}
               onChange={(e) => setRoomCode(e.target.value)}
               placeholder="Enter room code..."
-              className="text-uppercase bg-blue-900/50 border-blue-600 text-white placeholder-blue-400"
+              className="bg-gray-100 border-gray-400 text-black placeholder-gray-500"
             />
           </div>
 
           <Button
             onClick={handleJoinRoom}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+            className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
             disabled={isJoining || !(userName.trim() && roomCode.trim())}
           >
             {isJoining ? "Joining..." : "Join Room"}

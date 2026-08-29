@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Play, Pause, Shuffle, SkipForward, SkipBack, Volume2, Loader2, Circle, X } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Play, Pause, Shuffle, SkipForward, SkipBack, Volume2, Loader2 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 
 const Room = () => {
@@ -21,7 +21,6 @@ const Room = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null);
 
-  // Mock data for now - in real app this would come from GitHub or API
   const mockSongs = [
     { id: "1", title: "Chill Vibes", artist: "LoFi Beats", url: "/test.mp3" },
     { id: "2", title: "Midnight Drive", artist: "Synthwave", url: "/test.mp3" },
@@ -31,10 +30,9 @@ const Room = () => {
   ];
 
   useEffect(() => {
-    // Simulate loading user data
     setTimeout(() => {
       setUserName(`User${Math.floor(Math.random() * 1000)}`);
-      setIsHost(Math.random() > 0.5); // Randomly assign host for demo
+      setIsHost(Math.random() > 0.5);
       setUsers([`User${Math.floor(Math.random() * 1000)}`, `User${Math.floor(Math.random() * 1000)}`]);
       setPlaylist(mockSongs);
       setIsLoading(false);
@@ -98,7 +96,6 @@ const Room = () => {
   };
 
   const handleAddToPlaylist = () => {
-    // In real app, this would open a modal to select from GitHub
     alert("Add song feature coming soon!");
   };
 
@@ -108,89 +105,89 @@ const Room = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-blue-900 to-blue-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-white text-black flex items-center justify-center">
         <div className="text-center">
-          <div className="h-12 w-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="mt-4 text-blue-200">Loading room...</p>
+          <div className="h-12 w-12 border-4 border-black border-t-transparent animate-spin mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading room...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-900 to-blue-950 text-white">
+    <div className="min-h-screen bg-white text-black">
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* Room Header */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
-            <h1 className="text-2xl font-bold">Room {code}</h1>
+            <h1 className="text-2xl font-bold text-black">Room {code}</h1>
             <div className="flex items-center gap-2">
               {isHost && (
-                <span className="bg-blue-600/20 px-3 py-1 rounded text-xs">Host</span>
+                <span className="bg-black text-white px-3 py-1 text-xs font-medium">Host</span>
               )}
-              <Button variant="outline" onClick={handleLeaveRoom} size="sm">
+              <Button variant="outline" onClick={handleLeaveRoom} size="sm" className="border-gray-400 text-black hover:bg-gray-100">
                 Leave Room
               </Button>
             </div>
           </div>
-          <div className="bg-blue-800/30 backdrop-blur-sm rounded-xl p-4 border border-blue-700/50">
-            <p className="text-blue-200">Users in room: {users.length}</p>
+          <div className="bg-white/80 backdrop-blur-md border border-gray-300 p-4">
+            <p className="text-gray-600">Users in room: {users.length}</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {users.map((user, index) => (
-                <span key={index} className="bg-blue-900/50 px-2 py-1 rounded text-xs">{user}</span>
+                <span key={index} className="bg-gray-100 px-2 py-1 text-xs border border-gray-300 text-black">{user}</span>
               ))}
             </div>
           </div>
         </div>
 
         {/* Music Player Card */}
-        <Card className="mb-6">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-xl">Now Playing</CardTitle>
+        <Card className="mb-6 bg-white border-gray-300">
+          <CardHeader className="pb-4 border-b border-gray-200">
+            <CardTitle className="text-xl text-black">Now Playing</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 pt-6">
             {currentSongIndex >= 0 && currentSongIndex < playlist.length ? (
               <>
                 <div className="text-center">
-                  <h2 className="text-lg font-semibold">{playlist[currentSongIndex].title}</h2>
-                  <p className="text-blue-300">{playlist[currentSongIndex].artist}</p>
+                  <h2 className="text-lg font-semibold text-black">{playlist[currentSongIndex].title}</h2>
+                  <p className="text-gray-600">{playlist[currentSongIndex].artist}</p>
                 </div>
                 
-                <div className="flex items-center justify-center space-x-4">
-                  <Button variant="ghost" onClick={handleSkipPrevious} size="icon" aria-label="Previous">
+                <div className="flex items-center justify-center space-x-6">
+                  <Button variant="ghost" onClick={handleSkipPrevious} size="icon" aria-label="Previous" className="text-black hover:bg-gray-100">
                     <SkipBack className="h-5 w-5" />
                   </Button>
                   
                   <Button 
                     onClick={handlePlayPause} 
-                    className="w-14 h-14 bg-blue-600/50 hover:bg-blue-600/70 rounded-full flex items-center justify-center"
+                    className="w-14 h-14 bg-black hover:bg-gray-800 flex items-center justify-center"
                     aria-label={isPlaying ? "Pause" : "Play"}
                   >
                     {isPlaying ? (
-                      <Pause className="h-6 w-6" />
+                      <Pause className="h-6 w-6 text-white" />
                     ) : (
-                      <Play className="h-6 w-6" />
+                      <Play className="h-6 w-6 text-white" />
                     )}
                   </Button>
                   
-                  <Button variant="ghost" onClick={handleSkipNext} size="icon" aria-label="Next">
+                  <Button variant="ghost" onClick={handleSkipNext} size="icon" aria-label="Next" className="text-black hover:bg-gray-100">
                     <SkipForward className="h-5 w-5" />
                   </Button>
                 </div>
                 
-                <div className="flex items-center justify-between px-4">
+                <div className="flex items-center justify-between px-4 text-sm text-gray-500">
                   <span>0:00</span>
                   <span>0:00</span>
                 </div>
                 
-                <div className="flex items-center space-x-4">
+                <div className="flex items-center justify-between px-4">
                   <Button variant="ghost" onClick={handleShuffleToggle} size="icon" 
-                    className={`${isShuffle ? "text-blue-400" : "text-blue-300 hover:text-blue-400"}`}>
+                    className={`${isShuffle ? "text-black bg-gray-200" : "text-gray-600 hover:bg-gray-100 hover:text-black"}`}>
                     <Shuffle className="h-5 w-5" />
                   </Button>
                   
                   <div className="flex items-center gap-2">
-                    <Volume2 className="h-4 w-4" />
+                    <Volume2 className="h-4 w-4 text-gray-600" />
                     <input 
                       type="range" 
                       min="0" 
@@ -198,15 +195,15 @@ const Room = () => {
                       step="0.01" 
                       value={volume} 
                       onChange={(e) => setVolume(parseFloat(e.target.value))}
-                      className="w-20"
+                      className="w-20 accent-black"
                     />
                   </div>
                 </div>
               </>
             ) : (
               <div className="text-center py-8">
-                <p className="text-blue-400">No song selected</p>
-                <Button onClick={handleAddToPlaylist} className="mt-4">
+                <p className="text-gray-500">No song selected</p>
+                <Button onClick={handleAddToPlaylist} className="mt-4 bg-black hover:bg-gray-800 text-white">
                   Add to Playlist
                 </Button>
               </div>
@@ -217,71 +214,71 @@ const Room = () => {
         {/* Playlist Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Playlist */}
-          <Card className="lg:col-span-2">
-            <CardHeader className="pb-4">
-                          <div className="flex justify-between items-center">
-                            <CardTitle className="text-xl">Playlist</CardTitle>
-                            <Button onClick={handleAddToPlaylist} size="sm" variant="outline">
-                              Add Song
-                            </Button>
-                          </div>
-                        </CardHeader>
-            <CardContent className="space-y-2">
+          <Card className="lg:col-span-2 bg-white border-gray-300">
+            <CardHeader className="pb-4 border-b border-gray-200">
+              <div className="flex justify-between items-center">
+                <CardTitle className="text-xl text-black">Playlist</CardTitle>
+                <Button onClick={handleAddToPlaylist} size="sm" variant="outline" className="border-gray-400 text-black hover:bg-gray-100">
+                  Add Song
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 pt-4">
               {playlist.length > 0 ? (
                 playlist.map((song, index) => (
                   <div 
                     key={song.id} 
-                    className={`flex items-center justify-between px-3 py-2 rounded hover:bg-blue-900/20 transition-colors ${
-                      index === currentSongIndex ? "bg-blue-600/20" : ""
+                    className={`flex items-center justify-between px-3 py-2 transition-colors ${
+                      index === currentSongIndex ? "bg-gray-200" : "hover:bg-gray-100"
                     }`}
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium">{song.title}</div>
-                      <div className="text-sm text-blue-400">{song.artist}</div>
+                      <div className="font-medium text-black">{song.title}</div>
+                      <div className="text-sm text-gray-600">{song.artist}</div>
                     </div>
-                    <div className="text-xs text-blue-500">
+                    <div className="text-xs text-gray-500">
                       {index + 1}/{playlist.length}
                     </div>
                   </div>
                 ))
               ) : (
-                <p className="text-center py-4 text-blue-400">Playlist is empty</p>
+                <p className="text-center py-4 text-gray-500">Playlist is empty</p>
               )}
             </CardContent>
           </Card>
 
           {/* Controls (Host only) */}
           {!isHost ? null : (
-            <Card>
-              <CardHeader className="pb-4">
-                <CardTitle className="text-xl">Host Controls</CardTitle>
+            <Card className="bg-white border-gray-300">
+              <CardHeader className="pb-4 border-b border-gray-200">
+                <CardTitle className="text-xl text-black">Host Controls</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-4 pt-4">
                 <Button 
                   onClick={() => alert("Transfer host feature coming soon!")} 
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors mb-2"
+                  className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
                 >
                   Transfer Host
                 </Button>
                 
                 <div className="space-y-2">
-                  <p className="text-sm text-blue-400">Playback Mode:</p>
+                  <p className="text-sm text-gray-600">Playback Mode:</p>
                   <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className="flex items-center gap-2 cursor-pointer text-black">
                       <input 
                         type="radio" 
                         checked={!isShuffle} 
                         onChange={() => setIsShuffle(false)} 
-                        className="h-4 w-4 text-blue-600"
+                        className="h-4 w-4 accent-black"
                       />
                       <span>Sequential</span>
                     </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className="flex items-center gap-2 cursor-pointer text-black">
                       <input 
                         type="radio" 
                         checked={isShuffle} 
                         onChange={() => setIsShuffle(true)} 
-                        className="h-4 w-4 text-blue-600"
+                        className="h-4 w-4 accent-black"
                       />
                       <span>Shuffle</span>
                     </label>
