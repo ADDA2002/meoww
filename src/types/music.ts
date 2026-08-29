@@ -19,6 +19,7 @@ export interface RoomUser {
 export type SyncMessage =
   | { type: "JOIN"; user: RoomUser }
   | { type: "JOIN_REJECT"; reason: string; existingName: string }
+  | { type: "NAME_UPDATE"; newName: string; originalName: string }
   | { type: "USER_LIST"; users: RoomUser[] }
   | { type: "PLAY"; trackIndex: number; seekTime: number; timestamp: number }
   | { type: "PAUSE"; seekTime: number }

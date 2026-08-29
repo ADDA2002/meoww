@@ -51,7 +51,7 @@ const Room = () => {
 
   // Peer & connection states
   const [myId, setMyId] = useState<string>("");
-  const [userName] = useState<string>(initialName);
+  const [userName, setUserName] = useState<string>(initialName);
   const [isHost, setIsHost] = useState<boolean>(initialIsHost);
   const [users, setUsers] = useState<RoomUser[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -106,6 +106,28 @@ const Room = () => {
     });
   };
 
+  // Generate a unique name by adding a number prefix if there's a conflict
+  const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
+    const normalizedBase = baseName.trim().toLowerCase();
+    const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
+    
+    // Check if base name already exists
+    if (!existingNames.includes(normalizedBase)) {
+      return baseName;
+    }
+    
+    // Try adding numbers in front until we find a unique one
+    for (let i = 1; i <= 999; i++) {
+      const candidate = `${i}${baseName}`;
+      if (!existingNames.includes(candidate.toLowerCase())) {
+        return candidate;
+      }
+    }
+    
+    // Fallback: add timestamp suffix
+    return `${baseName}${Date.now()}`;
+  };
+
   // 1. Initialize PeerJS connection
   useEffect(() => {
     if (!roomCode) return;
@@ -117,9 +139,17 @@ const Room = () => {
     
     setMyId(generatedId);
 
+    // Generate unique name if needed (only for non-hosts joining)
+    const finalName = isHost ? userName : generateUniqueName(userName, []);
+    
+    // Update the displayed name if it changed
+    if (finalName !== userName) {
+      setUserName(finalName);
+    }
+
     const currentUser: RoomUser = {
       id: generatedId,
-      name: userName,
+      name: finalName,
       isHost: isHost,
       joinedAt: Date.now(),
     };
@@ -166,58 +196,72 @@ const Room = () => {
     conn.on("open", () => {
       // If this connection is from a listener trying to join the host
       if (isHostRef.current) {
-        // Check for duplicate name (case-insensitive)
-        const normalizedName = me.name.trim().toLowerCase();
-        const duplicate = usersRef.current.find(
-          (u) => u.name.trim().toLowerCase() === normalizedName
-        );
+        // Check for duplicate name (case-insensitive) and generate unique name
+        const uniqueName = generateUniqueName(me.name, usersRef.current);
+        const updatedUser = { ...me, name: uniqueName };
 
-        if (duplicate) {
+        // If name was changed, notify the user
+        if (uniqueName !== me.name) {
+          // Send the updated user info with the new name
+          connectionsRef.current.set(conn.peer, conn);
+          
+          // Send JOIN with the unique name
           conn.send({
-            type: "JOIN_REJECT",
-            reason: "duplicate_name",
-            existingName: duplicate.name,
+            type: "JOIN",
+            user: updatedUser,
           });
-          // Close the connection after sending the reject
-          setTimeout(() => {
-            try { conn.close(); } catch (e) { /* noop */ }
-          }, 100);
+          
+          // Send notification to the user about their new name
+          conn.send({
+            type: "NAME_UPDATE",
+            newName: uniqueName,
+            originalName: me.name,
+          });
+          
           return;
         }
-      }
 
-      connectionsRef.current.set(conn.peer, conn);
+        connectionsRef.current.set(conn.peer, conn);
 
-      // If listener connecting to host, announce self
-      conn.send({
-        type: "JOIN",
-        user: me,
-      });
-
-      // If host, send current state to the new listener
-      if (isHostRef.current) {
-        const audio = audioRef.current;
-        const currentSeek = audio ? audio.currentTime : 0;
-        
+        // If listener connecting to host, announce self
         conn.send({
-          type: "USER_LIST",
-          users: [...usersRef.current, { id: conn.peer, name: "Connecting...", isHost: false, joinedAt: Date.now() }],
+          type: "JOIN",
+          user: me,
         });
 
-        conn.send({
-          type: "UPDATE_QUEUE",
-          queue: queueRef.current,
-          activeIndex: currentIndexRef.current,
-        });
-
-        if (audio && !audio.paused) {
+        // If host, send current state to the new listener
+        if (isHostRef.current) {
+          const audio = audioRef.current;
+          const currentSeek = audio ? audio.currentTime : 0;
+          
           conn.send({
-            type: "PLAY",
-            trackIndex: currentIndexRef.current,
-            seekTime: currentSeek,
-            timestamp: Date.now(),
+            type: "USER_LIST",
+            users: [...usersRef.current, { id: conn.peer, name: "Connecting...", isHost: false, joinedAt: Date.now() }],
           });
+
+          conn.send({
+            type: "UPDATE_QUEUE",
+            queue: queueRef.current,
+            activeIndex: currentIndexRef.current,
+          });
+
+          if (audio && !audio.paused) {
+            conn.send({
+              type: "PLAY",
+              trackIndex: currentIndexRef.current,
+              seekTime: currentSeek,
+              timestamp: Date.now(),
+            });
+          }
         }
+      } else {
+        connectionsRef.current.set(conn.peer, conn);
+        
+        // If listener connecting to host, announce self
+        conn.send({
+          type: "JOIN",
+          user: me,
+        });
       }
     });
 
@@ -234,27 +278,45 @@ const Room = () => {
   // Handle incoming protocol messages
   const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
     switch (msg.type) {
+      case "NAME_UPDATE": {
+        // Update our displayed name if the host assigned us a new one
+        setUserName(msg.newName);
+        toast.info(`Your name was updated to "${msg.newName}" because "${msg.originalName}" was taken.`);
+        break;
+      }
+
       case "JOIN": {
         // If we're the host, do a final duplicate check before adding
         if (isHostRef.current) {
-          const normalizedName = msg.user.name.trim().toLowerCase();
-          const duplicate = usersRef.current.find(
-            (u) => u.name.trim().toLowerCase() === normalizedName
-          );
-          if (duplicate) {
+          const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
+          const updatedUser = { ...msg.user, name: uniqueName };
+
+          const newUser = updatedUser;
+          const updatedUsers = [...usersRef.current.filter(u => u.id !== newUser.id), newUser];
+          setUsers(updatedUsers);
+          
+          if (uniqueName !== msg.user.name) {
+            // Notify the user about the name change
             const conn = connectionsRef.current.get(senderPeerId);
             if (conn && conn.open) {
               conn.send({
-                type: "JOIN_REJECT",
-                reason: "duplicate_name",
-                existingName: duplicate.name,
+                type: "NAME_UPDATE",
+                newName: uniqueName,
+                originalName: msg.user.name,
               });
-              setTimeout(() => {
-                try { conn.close(); } catch (e) { /* noop */ }
-              }, 100);
             }
-            return;
+            toast.info(`${msg.user.name} joined as "${uniqueName}" (name adjusted).`);
+          } else {
+            toast.info(`${newUser.name} joined the jam!`);
           }
+
+          if (isHostRef.current) {
+            broadcast({
+              type: "USER_LIST",
+              users: updatedUsers,
+            });
+          }
+          break;
         }
 
         const newUser = msg.user;
@@ -267,19 +329,6 @@ const Room = () => {
             type: "USER_LIST",
             users: updatedUsers,
           });
-        }
-        break;
-      }
-
-      case "JOIN_REJECT": {
-        if (msg.reason === "duplicate_name") {
-          toast.error(`Someone with the name "${msg.existingName}" is already in this room. Please choose a different nickname.`, {
-            duration: 6000,
-          });
-          // Redirect back to home after a short delay so the user can rejoin
-          setTimeout(() => {
-            navigate("/");
-          }, 2500);
         }
         break;
       }
