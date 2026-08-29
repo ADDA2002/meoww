@@ -83,3 +83,31 @@
 .vinyl-rotate {
   animation: vinyl-spin 6s linear infinite;
 }
+
+/* Floating butterfly animation */
+@keyframes butterfly-float {
+  0% {
+    transform: translate(0, 0) rotate(5deg);
+    opacity: 0.9;
+  }
+  25% {
+    transform: translate(30px, -40px) rotate(-8deg);
+    opacity: 1;
+  }
+  50% {
+    transform: translate(60px, 20px) rotate(10deg);
+    opacity: 0.85;
+  }
+  75% {
+    transform: translate(20px, 50px) rotate(-5deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(0, 0) rotate(5deg);
+    opacity: 0.9;
+  }
+}
+
+.butterfly-float {
+  animation: butterfly-float 12s ease-in-out infinite;
+}
