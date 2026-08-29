@@ -36,13 +36,13 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
-      {/* Header Bar */}
-      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
+      {/* Header Bar - fixed/sticky so logo and badge stay in place when scrolling */}
+      <header className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <img
             src="/logo.gif"
             alt="Meoww Together Logo"
-            className="w-8 h-8 object-contain"
+            className="w-8 h-8 object-contain flex-shrink-0"
           />
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
@@ -51,8 +51,8 @@ const Index = () => {
         </div>
       </header>
 
-      {/* Main Container */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
+      {/* Main Container - padded to clear the fixed header */}
+      <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20 pt-24">
         <div className="w-full max-w-xl">
           {/* Tab Strip + Curtain Drawers */}
           <div 
