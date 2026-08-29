@@ -90,6 +90,13 @@ const Room = () => {
 
   const currentTrack = queue[currentIndex] || null;
 
+  // Sync mute state to audio element
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
+
   // Broadcast message to all active peer connections
   const broadcast = (msg: SyncMessage) => {
     connectionsRef.current.forEach((conn) => {
