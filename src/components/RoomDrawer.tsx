@@ -1,5 +1,5 @@
 import React from "react";
-import { X, Copy, Check } from "lucide-react";
+import { DoorOpen, Copy, Check, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -17,6 +17,7 @@ interface RoomDrawerProps {
 
 const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) => {
   const [copied, setCopied] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
@@ -24,16 +25,21 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleLeave = () => {
+    setOpen(false);
+    onLeave();
+  };
+
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <Button
           variant="outline"
           size="sm"
           className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
+          aria-label="Room options"
         >
-          <X className="w-3.5 h-3.5 mr-1" />
-          EXIT
+          <DoorOpen className="w-3.5 h-3.5" />
         </Button>
       </SheetTrigger>
       <SheetContent className="border-l border-black bg-white text-black rounded-none p-0">
@@ -81,9 +87,10 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
           {/* Exit Button */}
           <div className="pt-4 border-t border-gray-200">
             <Button
-              onClick={onLeave}
+              onClick={handleLeave}
               className="w-full bg-black hover:bg-neutral-800 text-white font-mono text-sm font-semibold py-3"
             >
+              <LogOut className="w-4 h-4 mr-2" />
               Leave Room
             </Button>
           </div>

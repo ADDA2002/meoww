@@ -8,14 +8,11 @@ import {
   Shuffle, 
   Volume2, 
   VolumeX,
-  LogOut, 
   Plus, 
   ArrowUp, 
   ArrowDown, 
   Trash2, 
   Radio, 
-  Copy, 
-  Check, 
   Music, 
   Upload, 
   Users,
@@ -53,7 +50,6 @@ const Room = () => {
   const [isHost, setIsHost] = useState<boolean>(initialIsHost);
   const [users, setUsers] = useState<RoomUser[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
 
   // Audio & Queue states
   const [queue, setQueue] = useState<Track[]>(DEFAULT_TRACKS);
@@ -634,13 +630,6 @@ const Room = () => {
     toast.info("Host controls transferred.");
   };
 
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(roomCode);
-    setCopied(true);
-    toast.success("Room code copied to clipboard!");
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const handleLeaveRoom = () => {
     navigate("/");
   };
@@ -676,18 +665,7 @@ const Room = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Copy code button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCopyCode}
-            className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
-          >
-            {copied ? <Check className="w-3.5 h-3.5 mr-1" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
-            {copied ? "COPIED" : "CODE"}
-          </Button>
-
-          {/* Room Options Drawer */}
+          {/* Room Options Drawer (door icon) */}
           <RoomDrawer
             roomCode={roomCode}
             userName={userName}
