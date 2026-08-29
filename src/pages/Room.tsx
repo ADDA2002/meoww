@@ -8,20 +8,16 @@ import {
   Shuffle, 
   Volume2, 
   VolumeX,
-  Share2, 
   LogOut, 
   Plus, 
   ArrowUp, 
   ArrowDown, 
   Trash2, 
-  Crown, 
   Radio, 
   Copy, 
   Check, 
   Music, 
   Upload, 
-  Link as LinkIcon,
-  RefreshCw,
   Users,
   AlertCircle
 } from "lucide-react";
@@ -40,6 +36,7 @@ import {
 import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
+import RoomDrawer from "@/components/RoomDrawer";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -644,10 +641,8 @@ const Room = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleCopyShareLink = () => {
-    const link = `${window.location.origin}/room/${roomCode}?host=false`;
-    navigator.clipboard.writeText(link);
-    toast.success("Share link copied to clipboard!");
+  const handleLeaveRoom = () => {
+    navigate("/");
   };
 
   const formatTime = (secs: number) => {
@@ -692,27 +687,12 @@ const Room = () => {
             {copied ? "COPIED" : "CODE"}
           </Button>
 
-          {/* Share link button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCopyShareLink}
-            className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
-          >
-            <Share2 className="w-3.5 h-3.5 mr-1" />
-            SHARE
-          </Button>
-
-          {/* Leave button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate("/")}
-            className="border-black text-red-600 hover:bg-red-50 text-xs font-mono font-semibold"
-          >
-            <LogOut className="w-3.5 h-3.5 mr-1" />
-            LEAVE
-          </Button>
+          {/* Room Options Drawer */}
+          <RoomDrawer
+            roomCode={roomCode}
+            userName={userName}
+            onLeave={handleLeaveRoom}
+          />
         </div>
       </header>
 
@@ -831,7 +811,7 @@ const Room = () => {
             {!isHost && (
               <div className="mt-4 p-2.5 bg-gray-50 border border-gray-200 text-xs text-gray-600 font-mono flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-black flex-shrink-0" />
-                <span>Host controls playback. Both of you can add and organize songs in the queue below.</span>
+                <span>Host controls playback. All can add and organize songs in the queue below.</span>
               </div>
             )}
           </div>

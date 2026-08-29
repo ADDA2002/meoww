@@ -1,0 +1,96 @@
+import React from "react";
+import { X, Copy, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+
+interface RoomDrawerProps {
+  roomCode: string;
+  userName: string;
+  onLeave: () => void;
+}
+
+const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) => {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(roomCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
+        >
+          <X className="w-3.5 h-3.5 mr-1" />
+          EXIT
+        </Button>
+      </SheetTrigger>
+      <SheetContent className="border-l border-black bg-white text-black rounded-none p-0">
+        <SheetHeader className="border-b border-gray-200 p-4 text-left">
+          <SheetTitle className="text-lg font-bold uppercase tracking-tight">Room Options</SheetTitle>
+        </SheetHeader>
+        
+        <div className="p-4 space-y-6">
+          {/* Room Code Section */}
+          <div className="space-y-3">
+            <div className="text-xs font-mono uppercase text-gray-500 tracking-wider">Room Code</div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 bg-gray-100 border border-gray-300 px-3 py-2.5 font-mono font-bold text-lg tracking-widest text-center">
+                {roomCode}
+              </div>
+              <Button
+                onClick={handleCopyCode}
+                variant="outline"
+                size="sm"
+                className="border-black hover:bg-gray-100 font-mono text-xs"
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 mr-1" />
+                    COPIED
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 mr-1" />
+                    COPY
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* User Info */}
+          <div className="space-y-2">
+            <div className="text-xs font-mono uppercase text-gray-500 tracking-wider">Connected As</div>
+            <div className="bg-gray-100 border border-gray-300 px-3 py-2.5 font-semibold">
+              {userName}
+            </div>
+          </div>
+
+          {/* Exit Button */}
+          <div className="pt-4 border-t border-gray-200">
+            <Button
+              onClick={onLeave}
+              className="w-full bg-black hover:bg-neutral-800 text-white font-mono text-sm font-semibold py-3"
+            >
+              Leave Room
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+};
+
+export default RoomDrawer;
