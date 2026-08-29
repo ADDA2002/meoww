@@ -35,11 +35,11 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
       <SheetTrigger asChild>
         <Button
           variant="outline"
-          size="lg"
-          className="border-black hover:bg-gray-100 text-xs font-mono font-semibold w-10 h-10 p-0 flex items-center justify-center"
+          size="sm"
+          className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
           aria-label="Open room options"
         >
-          <Menu className="w-5 h-5" />
+          <Menu className="w-4 h-4" />
         </Button>
       </SheetTrigger>
       <SheetContent className="border-l border-black bg-white text-black rounded-none p-0">
