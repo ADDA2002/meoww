@@ -180,7 +180,7 @@ const Index = () => {
                       id="create-name"
                       value={createName}
                       onChange={(e) => setCreateName(e.target.value)}
-                      placeholder="e.g. Alex"
+                      placeholder="e.g. Diva"
                       className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
                       autoFocus={activeTab === "create"}
                     />
@@ -213,7 +213,7 @@ const Index = () => {
                         setJoinName(e.target.value);
                         setJoinError(null);
                       }}
-                      placeholder="e.g. Taylor"
+                      placeholder="e.g. Adi"
                       className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
                       autoFocus={activeTab === "join"}
                     />
