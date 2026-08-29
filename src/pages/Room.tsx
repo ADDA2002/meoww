@@ -164,6 +164,28 @@ const Room = () => {
   // Connection data handler
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
     conn.on("open", () => {
+      // If this connection is from a listener trying to join the host
+      if (isHostRef.current) {
+        // Check for duplicate name (case-insensitive)
+        const normalizedName = me.name.trim().toLowerCase();
+        const duplicate = usersRef.current.find(
+          (u) => u.name.trim().toLowerCase() === normalizedName
+        );
+
+        if (duplicate) {
+          conn.send({
+            type: "JOIN_REJECT",
+            reason: "duplicate_name",
+            existingName: duplicate.name,
+          });
+          // Close the connection after sending the reject
+          setTimeout(() => {
+            try { conn.close(); } catch (e) { /* noop */ }
+          }, 100);
+          return;
+        }
+      }
+
       connectionsRef.current.set(conn.peer, conn);
 
       // If listener connecting to host, announce self
@@ -213,6 +235,28 @@ const Room = () => {
   const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
     switch (msg.type) {
       case "JOIN": {
+        // If we're the host, do a final duplicate check before adding
+        if (isHostRef.current) {
+          const normalizedName = msg.user.name.trim().toLowerCase();
+          const duplicate = usersRef.current.find(
+            (u) => u.name.trim().toLowerCase() === normalizedName
+          );
+          if (duplicate) {
+            const conn = connectionsRef.current.get(senderPeerId);
+            if (conn && conn.open) {
+              conn.send({
+                type: "JOIN_REJECT",
+                reason: "duplicate_name",
+                existingName: duplicate.name,
+              });
+              setTimeout(() => {
+                try { conn.close(); } catch (e) { /* noop */ }
+              }, 100);
+            }
+            return;
+          }
+        }
+
         const newUser = msg.user;
         const updatedUsers = [...usersRef.current.filter(u => u.id !== newUser.id), newUser];
         setUsers(updatedUsers);
@@ -223,6 +267,19 @@ const Room = () => {
             type: "USER_LIST",
             users: updatedUsers,
           });
+        }
+        break;
+      }
+
+      case "JOIN_REJECT": {
+        if (msg.reason === "duplicate_name") {
+          toast.error(`Someone with the name "${msg.existingName}" is already in this room. Please choose a different nickname.`, {
+            duration: 6000,
+          });
+          // Redirect back to home after a short delay so the user can rejoin
+          setTimeout(() => {
+            navigate("/");
+          }, 2500);
         }
         break;
       }
