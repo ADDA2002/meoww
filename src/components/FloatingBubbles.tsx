@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 interface Bubble {
   id: number;
@@ -28,7 +28,6 @@ const FloatingBubbles = () => {
   const animationRef = useRef<number>();
   const bubblesRef = useRef<Bubble[]>([]);
   const burstsRef = useRef<Burst[]>([]);
-  const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const timeRef = useRef<number>(0);
 
   // Sync refs
@@ -37,18 +36,18 @@ const FloatingBubbles = () => {
 
   // Initial bubbles
   useEffect(() => {
-    const initial: Bubble[] = Array.from({ length: 12 }, () => createBubble());
+    const initial: Bubble[] = Array.from({ length: 14 }, () => createBubble());
     setBubbles(initial);
   }, []);
 
   const createBubble = (): Bubble => ({
     id: nextBubbleId++,
     x: Math.random() * window.innerWidth,
-    y: window.innerHeight + Math.random() * 300,
-    size: 30 + Math.random() * 70,
-    speed: 0.4 + Math.random() * 0.8,
+    y: window.innerHeight + Math.random() * 200,
+    size: 40 + Math.random() * 80,
+    speed: 0.5 + Math.random() * 0.7,
     wobble: Math.random() * Math.PI * 2,
-    opacity: 0.15 + Math.random() * 0.25,
+    opacity: 0.45 + Math.random() * 0.35,
   });
 
   // Animation loop
@@ -60,32 +59,17 @@ const FloatingBubbles = () => {
       // Update bubbles
       const updatedBubbles = bubblesRef.current.map((b) => {
         const newY = b.y - b.speed;
-        const wobbleOffset = Math.sin(timeRef.current * 0.8 + b.wobble) * 1.5;
-        let newX = b.x + wobbleOffset;
+        const wobbleOffset = Math.sin(timeRef.current * 0.7 + b.wobble) * 1.2;
+        const newX = b.x + wobbleOffset;
 
-        // Mouse push
-        if (mouseRef.current) {
-          const dx = newX - mouseRef.current.x;
-          const dy = newY - mouseRef.current.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 120 && dist > 0) {
-            const force = (120 - dist) / 120;
-            newX += (dx / dist) * force * 3;
-          }
-        }
-
-        // Wrap
-        if (newX < -b.size) newX = w + b.size;
-        if (newX > w + b.size) newX = -b.size;
-
+        // Wrap horizontally
+        if (newX < -b.size) return { ...b, x: w + b.size, y: newY };
+        if (newX > w + b.size) return { ...b, x: -b.size, y: newY };
         return { ...b, x: newX, y: newY };
       }).filter((b) => b.y > -b.size * 2);
 
-      // Respawn
-      while (updatedBubbles.length < 10 && Math.random() > 0.95) {
-        updatedBubbles.push(createBubble());
-      }
-      if (updatedBubbles.length < 6) {
+      // Respawn bubbles that floated off
+      if (updatedBubbles.length < 14) {
         updatedBubbles.push(createBubble());
       }
 
@@ -108,29 +92,18 @@ const FloatingBubbles = () => {
     };
   }, []);
 
-  // Mouse tracking
-  useEffect(() => {
-    const handleMove = (e: MouseEvent) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
-    const handleLeave = () => { mouseRef.current = null; };
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseleave", handleLeave);
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseleave", handleLeave);
-    };
-  }, []);
-
   const burstBubble = useCallback((bubble: Bubble) => {
     setBubbles((prev) => prev.filter((b) => b.id !== bubble.id));
     setBursts((prev) => [
       ...prev,
-      { id: nextBurstId++, x: bubble.x, y: bubble.y, size: bubble.size, life: 15, maxLife: 15 },
+      { id: nextBurstId++, x: bubble.x, y: bubble.y, size: bubble.size, life: 20, maxLife: 20 },
     ]);
     setTimeout(() => {
       const replacement = createBubble();
       replacement.x = Math.random() * window.innerWidth;
+      replacement.y = window.innerHeight + 50;
       setBubbles((prev) => [...prev, replacement]);
-    }, 1000 + Math.random() * 2000);
+    }, 1200 + Math.random() * 1800);
   }, []);
 
   return (
@@ -149,30 +122,62 @@ const FloatingBubbles = () => {
             width: `${b.size}px`,
             height: `${b.size}px`,
             opacity: b.opacity,
-            background: "radial-gradient(circle at 35% 35%, rgba(255,255,255,0.9), rgba(200,220,255,0.3) 50%, rgba(150,180,220,0.2))",
-            border: "1px solid rgba(200,220,255,0.5)",
-            boxShadow: "inset -4px -4px 10px rgba(100,150,200,0.2), inset 4px 4px 10px rgba(255,255,255,0.8), 0 0 15px rgba(200,220,255,0.3)",
+            background:
+              "radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, rgba(220,235,255,0.5) 35%, rgba(180,210,240,0.25) 70%, rgba(150,190,230,0.15) 100%)",
+            border: "1.5px solid rgba(180,210,240,0.6)",
+            boxShadow:
+              "inset -6px -6px 14px rgba(100,150,200,0.15), inset 4px 4px 10px rgba(255,255,255,0.9), 0 0 18px rgba(200,225,250,0.4)",
             transform: "translate(-50%, -50%)",
             padding: 0,
           }}
-        />
+        >
+          {/* Highlight reflection */}
+          <span
+            className="absolute rounded-full"
+            style={{
+              left: "22%",
+              top: "18%",
+              width: "28%",
+              height: "20%",
+              background: "radial-gradient(ellipse, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%)",
+              filter: "blur(0.5px)",
+            }}
+          />
+        </button>
       ))}
 
       {/* Burst ripples */}
-      {bursts.map((burst) => (
-        <div
-          key={burst.id}
-          className="absolute rounded-full pointer-events-none border border-white/40"
-          style={{
-            left: `${burst.x}px`,
-            top: `${burst.y}px`,
-            width: `${burst.size * (1 + (1 - burst.life / burst.maxLife) * 0.8)}px`,
-            height: `${burst.size * (1 + (1 - burst.life / burst.maxLife) * 0.8)}px`,
-            opacity: (burst.life / burst.maxLife) * 0.6,
-            transform: "translate(-50%, -50%)",
-          }}
-        />
-      ))}
+      {bursts.map((burst) => {
+        const progress = 1 - burst.life / burst.maxLife;
+        return (
+          <React.Fragment key={burst.id}>
+            <div
+              className="absolute rounded-full pointer-events-none"
+              style={{
+                left: `${burst.x}px`,
+                top: `${burst.y}px`,
+                width: `${burst.size * (1 + progress * 1.5)}px`,
+                height: `${burst.size * (1 + progress * 1.5)}px`,
+                border: `2px solid rgba(180,220,255,${(burst.life / burst.maxLife) * 0.7})`,
+                opacity: (burst.life / burst.maxLife) * 0.8,
+                transform: "translate(-50%, -50%)",
+              }}
+            />
+            <div
+              className="absolute rounded-full pointer-events-none"
+              style={{
+                left: `${burst.x}px`,
+                top: `${burst.y}px`,
+                width: `${burst.size * (1 + progress * 2.2)}px`,
+                height: `${burst.size * (1 + progress * 2.2)}px`,
+                border: `1.5px solid rgba(200,230,255,${(burst.life / burst.maxLife) * 0.4})`,
+                opacity: (burst.life / burst.maxLife) * 0.5,
+                transform: "translate(-50%, -50%)",
+              }}
+            />
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 };
