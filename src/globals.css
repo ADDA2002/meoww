@@ -83,28 +83,3 @@
 .vinyl-rotate {
   animation: vinyl-spin 6s linear infinite;
 }
-
-/* Butterfly flight animation across the screen */
-@keyframes butterfly-fly {
-  0% {
-    left: -150px;
-    top: 25vh;
-  }
-  25% {
-    top: 45vh;
-  }
-  50% {
-    top: 20vh;
-  }
-  75% {
-    top: 55vh;
-  }
-  100% {
-    left: 110vw;
-    top: 30vh;
-  }
-}
-
-.butterfly-fly {
-  animation: butterfly-fly 18s linear infinite;
-}

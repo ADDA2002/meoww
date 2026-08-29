@@ -35,17 +35,9 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
-      {/* Butterfly GIF floating across the screen */}
-      <img
-        src="https://tenor.com/vLptXN0qldP.gif"
-        alt="Flying butterfly"
-        className="fixed pointer-events-none z-30 butterfly-fly"
-        style={{ width: "120px", height: "auto" }}
-      />
-
+    <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       {/* Header Bar */}
-      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-10">
+      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 bg-black"></div>
           <span className="font-bold tracking-wider text-sm uppercase">Jam Session</span>
@@ -57,7 +49,7 @@ const Index = () => {
       </header>
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-10">
+      <div className="flex-1 flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-xl">
           {/* Hero text */}
           <div className="text-center mb-8">
@@ -195,7 +187,7 @@ const Index = () => {
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-10">
+      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
         Jam Together &bull; Monochromatic Audio Streamer
       </footer>
     </div>
