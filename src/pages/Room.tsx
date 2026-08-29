@@ -693,20 +693,16 @@ const Room = () => {
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       {/* Top Room Navigation Bar */}
-      <header className="border-b border-black px-4 sm:px-8 py-3 flex items-center justify-between bg-white z-20">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 cursor-default">
-            <img
-              src="/logo.gif"
-              alt="Meoww Logo"
-              className="w-5 h-5 object-contain"
-            />
-            <span className="font-extrabold tracking-wider text-sm uppercase">Meoww</span>
-          </div>
-        </div>
-
+      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20 bg-white">
         <div className="flex items-center gap-2">
-          {/* Room Options Drawer (door icon) */}
+          <img
+            src="/logo.gif"
+            alt="Meoww Logo"
+            className="w-8 h-8 object-contain"
+          />
+          <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
+        </div>
+        <div className="flex items-center gap-2">
           <RoomDrawer
             roomCode={roomCode}
             userName={userName}
@@ -1064,9 +1060,8 @@ const Room = () => {
       />
 
       {/* Bottom status strip */}
-      <footer className="border-t border-black py-2.5 px-4 sm:px-8 flex justify-between items-center text-xs font-mono bg-white text-gray-600">
-        <div>CONNECTED AS: <span className="font-bold text-black uppercase">{userName}</span></div>
-        <div>Meoww &bull; Low Latency Sync</div>
+      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
+        Meoww &bull; Monochromatic Audio Streamer
       </footer>
     </div>
   );
