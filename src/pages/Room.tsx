@@ -81,7 +81,6 @@ const Room = () => {
   const queueRef = useRef<Track[]>(queue);
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
-  const seekBarRef = useRef<HTMLDivElement>(null);
 
   // Keep refs updated for event callbacks
   usersRef.current = users;
@@ -409,24 +408,6 @@ const Room = () => {
     }
   };
 
-  // Handle click on the seek bar container to seek to that position
-  const handleSeekBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isHost || !seekBarRef.current || !audioRef.current) return;
-    
-    const rect = seekBarRef.current.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const percentage = clickX / rect.width;
-    const targetTime = percentage * duration;
-    
-    audioRef.current.currentTime = targetTime;
-    setCurrentTime(targetTime);
-    broadcast({
-      type: "SEEK",
-      seekTime: targetTime,
-      timestamp: Date.now(),
-    });
-  };
-
   const handleAddSong = (e: React.FormEvent) => {
     e.preventDefault();
     if (!songTitle.trim() || !songUrl.trim()) {
@@ -567,9 +548,6 @@ const Room = () => {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  // Calculate progress percentage
-  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
-
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       {/* Top Room Navigation Bar */}
@@ -672,37 +650,17 @@ const Room = () => {
               </div>
             </div>
 
-            {/* Time progress bar - clickable seek bar */}
+            {/* Time progress bar */}
             <div className="space-y-1.5 mb-6">
-              {/* Custom seek bar container */}
-              <div 
-                ref={seekBarRef}
-                onClick={handleSeekBarClick}
-                className={`relative w-full h-1.5 bg-gray-200 border border-black cursor-pointer ${
-                  !isHost ? "opacity-50 cursor-not-allowed" : ""
-                }`}
-              >
-                {/* Progress fill */}
-                <div 
-                  className="absolute top-0 left-0 h-full bg-black transition-all duration-100"
-                  style={{ width: `${progressPercent}%` }}
-                />
-                {/* Hidden range input for precise seeking */}
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 100}
-                  value={currentTime}
-                  onChange={handleSeek}
-                  disabled={!isHost}
-                  className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
-                />
-                {/* Thumb indicator */}
-                <div 
-                  className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-black border border-white shadow pointer-events-none transition-all duration-100"
-                  style={{ left: `calc(${progressPercent}% - 6px)` }}
-                />
-              </div>
+              <input
+                type="range"
+                min={0}
+                max={duration || 100}
+                value={currentTime}
+                onChange={handleSeek}
+                disabled={!isHost}
+                className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black"
+              />
               <div className="flex justify-between text-xs font-mono text-gray-500">
                 <span>{formatTime(currentTime)}</span>
                 <span>{formatTime(duration)}</span>
