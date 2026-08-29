@@ -8,33 +8,11 @@ import Peer from "peerjs";
 
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
-// Generate room code based on user name
-const generateNameBasedCode = (name: string) => {
-  const cleanName = name.trim().toUpperCase().replace(/[^A-Z]/g, "");
-  
-  if (cleanName.length === 0) {
-    // Fallback to random code if no valid letters
-    return Array.from({ length: 6 }, () =>
-      ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]
-    ).join("");
-  }
-
-  // Get first letter
-  const firstLetter = cleanName[0];
-  
-  // Get a random letter from the name (not the first one if name is long enough)
-  const otherLetters = cleanName.slice(1);
-  const randomLetterFromName = otherLetters.length > 0
-    ? otherLetters[Math.floor(Math.random() * otherLetters.length)]
-    : firstLetter;
-  
-  // Generate 4 random numbers
-  const numbers = Array.from({ length: 4 }, () =>
-    Math.floor(Math.random() * 10)
+// Generate a random 6-character room code
+const generateRandomCode = () => {
+  return Array.from({ length: 6 }, () =>
+    ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]
   ).join("");
-  
-  // Combine: first letter + numbers + random letter from name
-  return `${firstLetter}${numbers}${randomLetterFromName}`;
 };
 
 // Single spinning digit component
@@ -99,7 +77,7 @@ const SpinningDigit = ({ char, direction, delay }: { char: string; direction: "u
 
 // Animated cycling placeholder for room codes - slot machine style
 const CyclingCodePlaceholder = () => {
-  const [codes, setCodes] = useState<string[]>(() => [generateNameBasedCode("DIVA"), generateNameBasedCode("ADII")]);
+  const [codes, setCodes] = useState<string[]>(() => [generateRandomCode(), generateRandomCode()]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [directions, setDirections] = useState<("up" | "down")[]>(() => 
     Array.from({ length: 6 }, () => Math.random() > 0.5 ? "up" : "down")
@@ -108,7 +86,7 @@ const CyclingCodePlaceholder = () => {
   useEffect(() => {
     const interval = setInterval(() => {
       // Generate new code
-      const newCode = generateNameBasedCode(["DIVA", "ADII", "ME", "JAM", "MUSIC", "PLAY"][Math.floor(Math.random() * 6)]);
+      const newCode = generateRandomCode();
       // Randomize directions for each digit
       const newDirections = Array.from({ length: 6 }, () => Math.random() > 0.5 ? "up" : "down") as ("up" | "down")[];
       
@@ -207,7 +185,7 @@ const Index = () => {
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
     if (!createName.trim()) return;
-    const generatedCode = generateNameBasedCode(createName.trim());
+    const generatedCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     navigate(`/room/${generatedCode}?name=${encodeURIComponent(createName.trim())}&host=true`);
   };
 
