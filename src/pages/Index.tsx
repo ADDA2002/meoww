@@ -44,11 +44,10 @@ const Index = () => {
             alt="Meoww Together Logo"
             className="w-8 h-8 object-contain"
           />
-          <span className="font-bold tracking-wider text-sm uppercase">Meoww Together</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
           <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
-          <span>REALTIME P2P AUDIO</span>
+          <span>SYNCED FOR 2</span>
         </div>
       </header>
 
