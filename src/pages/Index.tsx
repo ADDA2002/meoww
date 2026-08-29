@@ -39,7 +39,11 @@ const Index = () => {
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-black"></div>
+          <img
+            src="/logo.gif"
+            alt="Jam Session Logo"
+            className="w-8 h-8 object-contain"
+          />
           <span className="font-bold tracking-wider text-sm uppercase">Jam Session</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
