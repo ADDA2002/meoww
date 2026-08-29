@@ -7,7 +7,7 @@ import { ChevronDown, Radio, Users } from "lucide-react";
 
 const Index = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<"create" | "join" | null>("create");
+  const [activeTab, setActiveTab] = useState<"create" | "join" | null>(null);
   const [createName, setCreateName] = useState("");
   const [joinName, setJoinName] = useState("");
   const [joinCode, setJoinCode] = useState("");
