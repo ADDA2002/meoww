@@ -225,7 +225,7 @@ const Index = () => {
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3 floating-logo">
           <img
             src="/logo.gif"
             alt="Meoww Logo"

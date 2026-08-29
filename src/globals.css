@@ -83,3 +83,17 @@
 .vinyl-rotate {
   animation: vinyl-spin 6s linear infinite;
 }
+
+/* Floating logo animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.floating-logo {
+  animation: float 3s ease-in-out infinite;
+}
