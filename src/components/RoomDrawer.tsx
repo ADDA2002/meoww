@@ -1,5 +1,5 @@
 import React from "react";
-import { PanelRight, Copy, Check, LogOut } from "lucide-react";
+import { Menu, Copy, Check, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -39,7 +39,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
           className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
           aria-label="Open room options"
         >
-          <PanelRight className="w-3.5 h-3.5" />
+          <Menu className="w-4 h-4" />
         </Button>
       </SheetTrigger>
       <SheetContent className="border-l border-black bg-white text-black rounded-none p-0">
