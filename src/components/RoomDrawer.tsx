@@ -58,7 +58,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
               <Button
                 onClick={handleCopyCode}
                 variant="outline"
-                className="h-11 border-black hover:bg-gray-100 font-mono text-xs font-semibold px-4"
+                className="h-11 w-24 border-black hover:bg-gray-100 font-mono text-xs font-semibold flex-shrink-0"
               >
                 {copied ? (
                   <>
