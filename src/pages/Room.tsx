@@ -657,7 +657,7 @@ const Room = () => {
                 min={0}
                 max={duration || 100}
                 value={currentTime}
-                onChange={handleSeek}
+                onInput={handleSeek}
                 disabled={!isHost}
                 className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black"
               />
