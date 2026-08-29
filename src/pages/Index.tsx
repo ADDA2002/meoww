@@ -156,13 +156,6 @@ const Index = () => {
                     className="bg-blue-900/60 border-blue-600 text-white placeholder-blue-400"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label className="text-blue-200">Room Name</Label>
-                  <Input
-                    placeholder="Enter room name..."
-                    className="bg-blue-900/60 border-blue-600 text-white placeholder-blue-400"
-                  />
-                </div>
                 <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors">
                   Create Room
                 </Button>
