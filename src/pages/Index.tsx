@@ -55,37 +55,6 @@ const Index = () => {
       {/* Main Container */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
         <div className="w-full max-w-xl">
-          {/* Hero text */}
-          <div className="text-center mb-8">
-            {/* Highly Detailed ASCII Cat Face */}
-            <pre
-              aria-label="Detailed ASCII cat face"
-              className="inline-block font-mono text-black text-[8px] sm:text-[10px] leading-[1.05] whitespace-pre select-none"
-            >
-{`           ,     ,
-          /(     )\\
-         |  \\_/  |
-         |  |o o| |
-         |   _   |    /\\___/\\
-         |  (_)  |   / o   o \\
-         |       |  ( ==  ^  == )
-        /| | | | |\\  )        (
-       / | | | | | \\(          )
-      /  | | | | |  \\( (    ) ( )
-     |   | | | | |   |(|    |)|)|
-   _/|___|_|_|_|_|__/ |  w  | |/
-  | | | | | | | |   | |  __| |
-  | | | | | | | |   | | /   |
-  |_|_______|_______|_|/____|
-    | | | | | | | |   | |
-    | | | | | | | |   | |
-    | | | | | | | |   | |
-    ^^^^^^^^^^^^^^^^^^^^^
-        meoww together
-         "ready to jam"`}
-            </pre>
-          </div>
-
           {/* Tab Strip + Curtain Drawers */}
           <div 
             className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all duration-300"
