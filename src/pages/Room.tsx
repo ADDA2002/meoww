@@ -16,7 +16,8 @@ import {
   Music, 
   Upload, 
   Users,
-  AlertCircle
+  AlertCircle,
+  Wifi
 } from "lucide-react";
 import Peer, { DataConnection } from "peerjs";
 import { toast } from "sonner";
@@ -59,7 +60,7 @@ const Room = () => {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
-  const [audioLatencyMs, setAudioLatencyMs] = useState<number>(0);
+  const [ping, setPing] = useState<number>(0);
 
   // Add Song Dialog State
   const [addSongOpen, setAddSongOpen] = useState(false);
@@ -90,6 +91,56 @@ const Room = () => {
       audioRef.current.muted = isMuted;
     }
   }, [isMuted]);
+
+  // Ping measurement (listeners only)
+  useEffect(() => {
+    if (isHost) return; // Only listeners ping the host
+
+    const measurePing = () => {
+      const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
+      const testPeer = new Peer(`${myId}-ping-${Date.now()}`, { debug: 0 });
+      
+      const timeout = setTimeout(() => {
+        try { testPeer.destroy(); } catch (e) { /* noop */ }
+        // Use last known ping or show dash
+        setPing((prev) => prev || 0);
+      }, 2000);
+
+      testPeer.on("open", () => {
+        const startTime = Date.now();
+        const conn = testPeer.connect(hostPeerId, { reliable: true });
+
+        conn.on("open", () => {
+          clearTimeout(timeout);
+          const endTime = Date.now();
+          setPing(endTime - startTime);
+          try { conn.close(); } catch (e) { /* noop */ }
+          try { testPeer.destroy(); } catch (e) { /* noop */ }
+        });
+
+        conn.on("error", () => {
+          clearTimeout(timeout);
+          try { testPeer.destroy(); } catch (e) { /* noop */ }
+        });
+      });
+
+      testPeer.on("error", () => {
+        clearTimeout(timeout);
+        try { testPeer.destroy(); } catch (e) { /* noop */ }
+      });
+    };
+
+    // Initial ping after connection
+    const initialTimer = setTimeout(measurePing, 1000);
+    
+    // Re-ping every 5 seconds
+    const interval = setInterval(measurePing, 5000);
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+    };
+  }, [isHost, roomCode, myId]);
 
   // Broadcast message to all active peer connections
   const broadcast = (msg: SyncMessage) => {
@@ -341,7 +392,6 @@ const Room = () => {
         // Millisecond accurate sync compensation
         const latencySec = (Date.now() - msg.timestamp) / 1000;
         const targetTime = msg.seekTime + latencySec;
-        setAudioLatencyMs(Math.round(latencySec * 1000));
 
         if (currentIndexRef.current !== msg.trackIndex) {
           setCurrentIndex(msg.trackIndex);
@@ -681,8 +731,8 @@ const Room = () => {
                 </span>
               </div>
               <div className="flex items-center gap-1 text-gray-500">
-                <Radio className="w-3 h-3" />
-                <span>{audioLatencyMs}ms offset</span>
+                <Wifi className="w-3 h-3" />
+                <span>ping {ping}ms</span>
               </div>
             </div>
 
