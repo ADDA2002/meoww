@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronDown, Radio, Music2, Headphones } from "lucide-react";
-import AnimatedDrawer from "@/components/AnimatedDrawer";
+import { ChevronDown, Radio } from "lucide-react";
 
 const Index = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"create" | "join" | null>(null);
   const [createName, setCreateName] = useState("");
   const [joinName, setJoinName] = useState("");
@@ -19,8 +20,29 @@ const Index = () => {
     }
   };
 
+  const handleCreateRoom = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createName.trim()) return;
+    const generatedCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    navigate(`/room/${generatedCode}?name=${encodeURIComponent(createName.trim())}&host=true`);
+  };
+
+  const handleJoinRoom = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!joinName.trim() || !joinCode.trim()) return;
+    const cleanCode = joinCode.trim().toUpperCase();
+    navigate(`/room/${cleanCode}?name=${encodeURIComponent(joinName.trim())}&host=false`);
+  };
+
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
+      {/* Floating Butterfly GIF */}
+      <img
+        src="https://tenor.com/vLptXN0qldP.gif"
+        alt="Butterfly"
+        className="butterfly-float fixed w-20 sm:w-28 pointer-events-none z-10"
+      />
+
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
         <div className="flex items-center gap-2">
@@ -36,8 +58,8 @@ const Index = () => {
       {/* Main Container */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
         <div className="w-full max-w-xl">
-          {/* Hero text with 3D entrance animation */}
-          <div className="text-center mb-6 hero-entrance">
+          {/* Hero text */}
+          <div className="text-center mb-8">
             <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
               Jam Together
             </h1>
@@ -47,7 +69,9 @@ const Index = () => {
           </div>
 
           {/* Tab Strip + Curtain Drawers */}
-          <div className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] card-rise">
+          <div 
+            className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all duration-300"
+          >
             <div className="flex border-b border-black">
               {/* Create Room Tab */}
               <button
@@ -57,7 +81,6 @@ const Index = () => {
                   activeTab === "create" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
               >
-                <Music2 className="w-4 h-4" />
                 <span>Create Room</span>
                 <ChevronDown className={`h-4 w-4 transition-transform duration-300 ${activeTab === "create" ? "rotate-180" : ""}`} />
               </button>
@@ -70,36 +93,99 @@ const Index = () => {
                   activeTab === "join" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
               >
-                <Headphones className="w-4 h-4" />
                 <span>Join Room</span>
                 <ChevronDown className={`h-4 w-4 transition-transform duration-300 ${activeTab === "join" ? "rotate-180" : ""}`} />
               </button>
             </div>
 
-            {/* Animated Drawer */}
-            <AnimatedDrawer
-              activeTab={activeTab}
-              setActiveTab={setActiveTab}
-              createName={createName}
-              setCreateName={setCreateName}
-              joinName={joinName}
-              setJoinName={setJoinName}
-              joinCode={joinCode}
-              setJoinCode={setJoinCode}
-            />
+            {/* Drawers Content */}
+            <div className="relative overflow-hidden">
+              {/* Create Room Drawer */}
+              <div 
+                className={`transition-all duration-500 ease-in-out ${
+                  activeTab === "create" ? "max-h-[300px] opacity-100 p-6" : "max-h-0 opacity-0 p-0 overflow-hidden"
+                }`}
+              >
+                <form onSubmit={handleCreateRoom} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="create-name" className="text-xs font-mono uppercase text-gray-700">
+                      Your Nickname
+                    </Label>
+                    <Input
+                      id="create-name"
+                      value={createName}
+                      onChange={(e) => setCreateName(e.target.value)}
+                      placeholder="e.g. Alex"
+                      className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
+                      autoFocus={activeTab === "create"}
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
+                    disabled={!createName.trim()}
+                  >
+                    Start Session as Host
+                  </Button>
+                </form>
+              </div>
+
+              {/* Join Room Drawer */}
+              <div 
+                className={`transition-all duration-500 ease-in-out ${
+                  activeTab === "join" ? "max-h-[350px] opacity-100 p-6" : "max-h-0 opacity-0 p-0 overflow-hidden"
+                }`}
+              >
+                <form onSubmit={handleJoinRoom} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="join-name" className="text-xs font-mono uppercase text-gray-700">
+                      Your Nickname
+                    </Label>
+                    <Input
+                      id="join-name"
+                      value={joinName}
+                      onChange={(e) => setJoinName(e.target.value)}
+                      placeholder="e.g. Taylor"
+                      className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
+                      autoFocus={activeTab === "join"}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="join-code" className="text-xs font-mono uppercase text-gray-700">
+                      6-Letter Room Code
+                    </Label>
+                    <Input
+                      id="join-code"
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                      placeholder="e.g. X9KJ2B"
+                      maxLength={8}
+                      className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
+                    disabled={!joinName.trim() || !joinCode.trim()}
+                  >
+                    Join Session
+                  </Button>
+                </form>
+              </div>
+            </div>
           </div>
 
-          {/* Quick info feature cards with card-rise entry animation */}
+          {/* Quick info feature card */}
           <div className="mt-8 grid grid-cols-3 gap-2 text-center text-xs text-gray-600 font-mono">
-            <div className="p-3 border border-gray-200 bg-white card-rise">
+            <div className="p-3 border border-gray-200 bg-gray-50">
               <span className="font-bold text-black block mb-1">01. SYNC</span>
               Exact track time alignment
             </div>
-            <div className="p-3 border border-gray-200 bg-white card-rise" style={{ animationDelay: "0.1s" }}>
+            <div className="p-3 border border-gray-200 bg-gray-50">
               <span className="font-bold text-black block mb-1">02. CO-OP</span>
               Both can add songs & reorder
             </div>
-            <div className="p-3 border border-gray-200 bg-white card-rise" style={{ animationDelay: "0.2s" }}>
+            <div className="p-3 border border-gray-200 bg-gray-50">
               <span className="font-bold text-black block mb-1">03. FREE</span>
               No ads, 0 data stored
             </div>
