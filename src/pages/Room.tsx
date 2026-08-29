@@ -1,301 +1,973 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { 
+  Play, 
+  Pause, 
+  SkipForward, 
+  SkipBack, 
+  Shuffle, 
+  Volume2, 
+  VolumeX,
+  Share2, 
+  LogOut, 
+  Plus, 
+  ArrowUp, 
+  ArrowDown, 
+  Trash2, 
+  Crown, 
+  Radio, 
+  Copy, 
+  Check, 
+  Music, 
+  Upload, 
+  Link as LinkIcon,
+  RefreshCw,
+  Users,
+  AlertCircle
+} from "lucide-react";
+import Peer, { DataConnection } from "peerjs";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Play, Pause, Shuffle, SkipForward, SkipBack, Volume2, Loader2 } from "lucide-react";
-import { useParams, useNavigate } from "react-router-dom";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Track, RoomUser, SyncMessage } from "@/types/music";
+import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  
-  const [isHost, setIsHost] = useState(false);
-  const [userName, setUserName] = useState("");
-  const [users, setUsers] = useState<string[]>([]);
-  const [playlist, setPlaylist] = useState<Array<{id: string; title: string; artist: string; url: string}>>([]);
-  const [currentSongIndex, setCurrentSongIndex] = useState<number>(-1);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isShuffle, setIsShuffle] = useState(false);
-  const [volume, setVolume] = useState(0.7);
-  const [isLoading, setIsLoading] = useState(true);
-  const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null);
 
-  const mockSongs = [
-    { id: "1", title: "Chill Vibes", artist: "LoFi Beats", url: "/test.mp3" },
-    { id: "2", title: "Midnight Drive", artist: "Synthwave", url: "/test.mp3" },
-    { id: "3", title: "Rainy Day Jazz", artist: "Coffee Shop", url: "/test.mp3" },
-    { id: "4", title: "Deep Focus", artist: "Study Music", url: "/test.mp3" },
-    { id: "5", title: "Night Walk", artist: "Ambient Sounds", url: "/test.mp3" },
-  ];
+  const roomCode = (code || "").toUpperCase();
+  const initialName = searchParams.get("name") || "Guest";
+  const initialIsHost = searchParams.get("host") === "true";
 
-  useEffect(() => {
-    setTimeout(() => {
-      setUserName(`User${Math.floor(Math.random() * 1000)}`);
-      setIsHost(Math.random() > 0.5);
-      setUsers([`User${Math.floor(Math.random() * 1000)}`, `User${Math.floor(Math.random() * 1000)}`]);
-      setPlaylist(mockSongs);
-      setIsLoading(false);
-    }, 1000);
-  }, [code]);
+  // Peer & connection states
+  const [myId, setMyId] = useState<string>("");
+  const [userName] = useState<string>(initialName);
+  const [isHost, setIsHost] = useState<boolean>(initialIsHost);
+  const [users, setUsers] = useState<RoomUser[]>([]);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
 
-  useEffect(() => {
-    if (audioRef) {
-      audioRef.volume = volume;
-    }
-  }, [volume, audioRef]);
+  // Audio & Queue states
+  const [queue, setQueue] = useState<Track[]>(DEFAULT_TRACKS);
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isShuffle, setIsShuffle] = useState<boolean>(false);
+  const [volume, setVolume] = useState<number>(0.8);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+  const [audioLatencyMs, setAudioLatencyMs] = useState<number>(0);
 
-  const handlePlayPause = () => {
-    if (audioRef) {
-      if (isPlaying) {
-        audioRef.pause();
-      } else {
-        if (currentSongIndex === -1 && playlist.length > 0) {
-          setCurrentSongIndex(0);
-        }
-        audioRef.play();
+  // Add Song Dialog State
+  const [addSongOpen, setAddSongOpen] = useState(false);
+  const [songTitle, setSongTitle] = useState("");
+  const [songArtist, setSongArtist] = useState("");
+  const [songUrl, setSongUrl] = useState("");
+
+  // Refs
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const peerRef = useRef<Peer | null>(null);
+  const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
+  const usersRef = useRef<RoomUser[]>([]);
+  const queueRef = useRef<Track[]>(queue);
+  const isHostRef = useRef<boolean>(isHost);
+  const currentIndexRef = useRef<number>(currentIndex);
+
+  // Keep refs updated for event callbacks
+  usersRef.current = users;
+  queueRef.current = queue;
+  isHostRef.current = isHost;
+  currentIndexRef.current = currentIndex;
+
+  const currentTrack = queue[currentIndex] || null;
+
+  // Broadcast message to all active peer connections
+  const broadcast = (msg: SyncMessage) => {
+    connectionsRef.current.forEach((conn) => {
+      if (conn.open) {
+        conn.send(msg);
       }
-      setIsPlaying(!isPlaying);
+    });
+  };
+
+  // 1. Initialize PeerJS connection
+  useEffect(() => {
+    if (!roomCode) return;
+
+    // A deterministic peer ID for the host so others can join, and random for listeners
+    const generatedId = isHost 
+      ? `jam-room-${roomCode.toLowerCase()}` 
+      : `jam-user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
+    
+    setMyId(generatedId);
+
+    const currentUser: RoomUser = {
+      id: generatedId,
+      name: userName,
+      isHost: isHost,
+      joinedAt: Date.now(),
+    };
+
+    setUsers([currentUser]);
+
+    const peer = new Peer(generatedId, {
+      debug: 1,
+    });
+    peerRef.current = peer;
+
+    peer.on("open", (id) => {
+      setIsConnected(true);
+      
+      if (!isHost) {
+        // Connect to host peer
+        const hostPeerId = `jam-room-${roomCode.toLowerCase()}`;
+        const conn = peer.connect(hostPeerId, { reliable: true });
+        setupConnection(conn, currentUser);
+      }
+    });
+
+    peer.on("connection", (conn) => {
+      setupConnection(conn, currentUser);
+    });
+
+    peer.on("error", (err: any) => {
+      console.warn("PeerJS error:", err);
+      if (err.type === "unavailable-id" && isHost) {
+        toast.error("Room host already active. Joining as listener.");
+        setIsHost(false);
+      } else {
+        toast.error("Connection notice: " + (err.message || "Working in local mode."));
+      }
+    });
+
+    return () => {
+      peer.destroy();
+    };
+  }, [roomCode]);
+
+  // Connection data handler
+  const setupConnection = (conn: DataConnection, me: RoomUser) => {
+    conn.on("open", () => {
+      connectionsRef.current.set(conn.peer, conn);
+
+      // If listener connecting to host, announce self
+      conn.send({
+        type: "JOIN",
+        user: me,
+      });
+
+      // If host, send current state to the new listener
+      if (isHostRef.current) {
+        const audio = audioRef.current;
+        const currentSeek = audio ? audio.currentTime : 0;
+        
+        conn.send({
+          type: "USER_LIST",
+          users: [...usersRef.current, { id: conn.peer, name: "Connecting...", isHost: false, joinedAt: Date.now() }],
+        });
+
+        conn.send({
+          type: "UPDATE_QUEUE",
+          queue: queueRef.current,
+          activeIndex: currentIndexRef.current,
+        });
+
+        if (audio && !audio.paused) {
+          conn.send({
+            type: "PLAY",
+            trackIndex: currentIndexRef.current,
+            seekTime: currentSeek,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    });
+
+    conn.on("data", (data: any) => {
+      handleIncomingMessage(data as SyncMessage, conn.peer);
+    });
+
+    conn.on("close", () => {
+      connectionsRef.current.delete(conn.peer);
+      handlePeerDisconnect(conn.peer);
+    });
+  };
+
+  // Handle incoming protocol messages
+  const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
+    switch (msg.type) {
+      case "JOIN": {
+        const newUser = msg.user;
+        const updatedUsers = [...usersRef.current.filter(u => u.id !== newUser.id), newUser];
+        setUsers(updatedUsers);
+        toast.info(`${newUser.name} joined the jam!`);
+
+        if (isHostRef.current) {
+          broadcast({
+            type: "USER_LIST",
+            users: updatedUsers,
+          });
+        }
+        break;
+      }
+
+      case "USER_LIST": {
+        setUsers(msg.users);
+        break;
+      }
+
+      case "PLAY": {
+        const audio = audioRef.current;
+        if (!audio) return;
+
+        // Millisecond accurate sync compensation
+        const latencySec = (Date.now() - msg.timestamp) / 1000;
+        const targetTime = msg.seekTime + latencySec;
+        setAudioLatencyMs(Math.round(latencySec * 1000));
+
+        if (currentIndexRef.current !== msg.trackIndex) {
+          setCurrentIndex(msg.trackIndex);
+        }
+
+        if (Math.abs(audio.currentTime - targetTime) > 0.15) {
+          audio.currentTime = targetTime;
+        }
+
+        audio.play().then(() => setIsPlaying(true)).catch((e) => {
+          console.log("Auto-play blocked, user click needed:", e);
+        });
+        break;
+      }
+
+      case "PAUSE": {
+        const audio = audioRef.current;
+        if (audio) {
+          audio.currentTime = msg.seekTime;
+          audio.pause();
+          setIsPlaying(false);
+        }
+        break;
+      }
+
+      case "SEEK": {
+        const audio = audioRef.current;
+        if (audio) {
+          const latencySec = (Date.now() - msg.timestamp) / 1000;
+          audio.currentTime = msg.seekTime + latencySec;
+        }
+        break;
+      }
+
+      case "UPDATE_QUEUE": {
+        setQueue(msg.queue);
+        if (msg.activeIndex !== undefined) {
+          setCurrentIndex(msg.activeIndex);
+        }
+        break;
+      }
+
+      case "HOST_TRANSFER": {
+        if (msg.newHostId === myId) {
+          setIsHost(true);
+          toast.success("You are now the Host of this Jam!");
+        } else {
+          setIsHost(false);
+        }
+        setUsers((prev) =>
+          prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId }))
+        );
+        break;
+      }
     }
   };
 
-  const handleSkipNext = () => {
-    if (playlist.length === 0) return;
-    let nextIndex;
-    if (isShuffle) {
-      nextIndex = Math.floor(Math.random() * playlist.length);
+  // If host leaves, automatic host failover to the next joined user
+  const handlePeerDisconnect = (disconnectedId: string) => {
+    const remainingUsers = usersRef.current.filter((u) => u.id !== disconnectedId);
+    setUsers(remainingUsers);
+
+    const wasHost = usersRef.current.find((u) => u.id === disconnectedId)?.isHost;
+    if (wasHost && remainingUsers.length > 0) {
+      // Pick the next earliest joined participant
+      const sorted = [...remainingUsers].sort((a, b) => a.joinedAt - b.joinedAt);
+      const nextHost = sorted[0];
+
+      if (nextHost.id === myId) {
+        setIsHost(true);
+        toast.success("Host left. You are now the host!");
+        broadcast({
+          type: "HOST_TRANSFER",
+          newHostId: nextHost.id,
+        });
+      }
+    }
+  };
+
+  // Playback audio element controls
+  const handleTogglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+      broadcast({
+        type: "PAUSE",
+        seekTime: audio.currentTime,
+      });
     } else {
-      nextIndex = (currentSongIndex + 1) % playlist.length;
-    }
-    setCurrentSongIndex(nextIndex);
-    if (audioRef) {
-      audioRef.src = playlist[nextIndex].url;
-      audioRef.play().catch(console.error);
-      setIsPlaying(true);
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: currentIndex,
+          seekTime: audio.currentTime,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
     }
   };
 
-  const handleSkipPrevious = () => {
-    if (playlist.length === 0) return;
-    let prevIndex;
+  const handleNext = () => {
+    if (queue.length === 0) return;
+    let nextIdx = 0;
     if (isShuffle) {
-      prevIndex = Math.floor(Math.random() * playlist.length);
+      nextIdx = Math.floor(Math.random() * queue.length);
     } else {
-      prevIndex = (currentSongIndex - 1 + playlist.length) % playlist.length;
+      nextIdx = (currentIndex + 1) % queue.length;
     }
-    setCurrentSongIndex(prevIndex);
-    if (audioRef) {
-      audioRef.src = playlist[prevIndex].url;
-      audioRef.play().catch(console.error);
-      setIsPlaying(true);
+    setCurrentIndex(nextIdx);
+
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: nextIdx,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
     }
   };
 
-  const handleShuffleToggle = () => {
-    setIsShuffle(!isShuffle);
+  const handlePrevious = () => {
+    if (queue.length === 0) return;
+    let prevIdx = 0;
+    if (isShuffle) {
+      prevIdx = Math.floor(Math.random() * queue.length);
+    } else {
+      prevIdx = (currentIndex - 1 + queue.length) % queue.length;
+    }
+    setCurrentIndex(prevIdx);
+
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: prevIdx,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
+    }
   };
 
-  const handleAddToPlaylist = () => {
-    alert("Add song feature coming soon!");
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const targetTime = parseFloat(e.target.value);
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = targetTime;
+      setCurrentTime(targetTime);
+      broadcast({
+        type: "SEEK",
+        seekTime: targetTime,
+        timestamp: Date.now(),
+      });
+    }
   };
 
-  const handleLeaveRoom = () => {
-    navigate("/");
+  const handleAddSong = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!songTitle.trim() || !songUrl.trim()) {
+      toast.error("Please provide a title and audio URL.");
+      return;
+    }
+
+    const newTrack: Track = {
+      id: `track-${Date.now()}`,
+      title: songTitle.trim(),
+      artist: songArtist.trim() || "Independent Artist",
+      url: songUrl.trim(),
+      addedBy: userName,
+    };
+
+    const updatedQueue = [...queue, newTrack];
+    setQueue(updatedQueue);
+    broadcast({
+      type: "UPDATE_QUEUE",
+      queue: updatedQueue,
+      activeIndex: currentIndex,
+    });
+
+    setSongTitle("");
+    setSongArtist("");
+    setSongUrl("");
+    setAddSongOpen(false);
+    toast.success("Track added to queue!");
   };
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-white text-black flex items-center justify-center">
-        <div className="text-center">
-          <div className="h-12 w-12 border-4 border-black border-t-transparent animate-spin mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading room...</p>
-        </div>
-      </div>
+  // Upload local MP3 file (for user's test.mp3 or local music)
+  const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fileUrl = URL.createObjectURL(file);
+    const newTrack: Track = {
+      id: `local-${Date.now()}`,
+      title: file.name.replace(/\.[^/.]+$/, ""),
+      artist: `${userName} (Local MP3)`,
+      url: fileUrl,
+      addedBy: userName,
+      isLocalFile: true,
+    };
+
+    const updatedQueue = [...queue, newTrack];
+    setQueue(updatedQueue);
+    broadcast({
+      type: "UPDATE_QUEUE",
+      queue: updatedQueue,
+      activeIndex: currentIndex,
+    });
+
+    toast.success(`Loaded local audio: ${file.name}`);
+    setAddSongOpen(false);
+  };
+
+  const handleReorder = (idx: number, direction: "up" | "down") => {
+    if (direction === "up" && idx === 0) return;
+    if (direction === "down" && idx === queue.length - 1) return;
+
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    const newQueue = [...queue];
+    const temp = newQueue[idx];
+    newQueue[idx] = newQueue[targetIdx];
+    newQueue[targetIdx] = temp;
+
+    // update active index if needed
+    let newActive = currentIndex;
+    if (currentIndex === idx) {
+      newActive = targetIdx;
+    } else if (currentIndex === targetIdx) {
+      newActive = idx;
+    }
+
+    setQueue(newQueue);
+    setCurrentIndex(newActive);
+
+    broadcast({
+      type: "UPDATE_QUEUE",
+      queue: newQueue,
+      activeIndex: newActive,
+    });
+  };
+
+  const handleRemoveTrack = (idx: number) => {
+    if (queue.length <= 1) {
+      toast.error("Queue must have at least one track.");
+      return;
+    }
+    const newQueue = queue.filter((_, i) => i !== idx);
+    let newActive = currentIndex;
+    if (idx < currentIndex) {
+      newActive = currentIndex - 1;
+    } else if (idx === currentIndex) {
+      newActive = Math.min(currentIndex, newQueue.length - 1);
+    }
+    setQueue(newQueue);
+    setCurrentIndex(newActive);
+
+    broadcast({
+      type: "UPDATE_QUEUE",
+      queue: newQueue,
+      activeIndex: newActive,
+    });
+  };
+
+  const handleTransferHost = (targetUserId: string) => {
+    if (!isHost) return;
+    setIsHost(false);
+    setUsers((prev) =>
+      prev.map((u) => ({ ...u, isHost: u.id === targetUserId }))
     );
-  }
+    broadcast({
+      type: "HOST_TRANSFER",
+      newHostId: targetUserId,
+    });
+    toast.info("Host controls transferred.");
+  };
+
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(roomCode);
+    setCopied(true);
+    toast.success("Room code copied to clipboard!");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyShareLink = () => {
+    const link = `${window.location.origin}/room/${roomCode}?host=false`;
+    navigator.clipboard.writeText(link);
+    toast.success("Share link copied to clipboard!");
+  };
+
+  const formatTime = (secs: number) => {
+    if (isNaN(secs) || secs < 0) return "0:00";
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  };
 
   return (
-    <div className="min-h-screen bg-white text-black">
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        {/* Room Header */}
-        <div className="mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h1 className="text-2xl font-bold text-black">Room {code}</h1>
-            <div className="flex items-center gap-2">
-              {isHost && (
-                <span className="bg-black text-white px-3 py-1 text-xs font-medium">Host</span>
-              )}
-              <Button variant="outline" onClick={handleLeaveRoom} size="sm" className="border-gray-400 text-black hover:bg-gray-100">
-                Leave Room
-              </Button>
-            </div>
+    <div className="min-h-screen bg-white text-black flex flex-col justify-between">
+      {/* Top Room Navigation Bar */}
+      <header className="border-b border-black px-4 sm:px-8 py-3 flex items-center justify-between bg-white z-20">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/")}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          >
+            <div className="w-3.5 h-3.5 bg-black"></div>
+            <span className="font-extrabold tracking-wider text-sm uppercase">JAM TOGETHER</span>
+          </button>
+          <span className="text-gray-300">/</span>
+          <div className="flex items-center gap-1.5 font-mono text-xs font-bold bg-gray-100 px-2 py-1 border border-gray-300">
+            <span>ROOM:</span>
+            <span className="tracking-widest text-black">{roomCode}</span>
           </div>
-          <div className="bg-white/80 backdrop-blur-md border border-gray-300 p-4">
-            <p className="text-gray-600">Users in room: {users.length}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {users.map((user, index) => (
-                <span key={index} className="bg-gray-100 px-2 py-1 text-xs border border-gray-300 text-black">{user}</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Copy code button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopyCode}
+            className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 mr-1" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
+            {copied ? "COPIED" : "CODE"}
+          </Button>
+
+          {/* Share link button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopyShareLink}
+            className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
+          >
+            <Share2 className="w-3.5 h-3.5 mr-1" />
+            SHARE
+          </Button>
+
+          {/* Leave button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/")}
+            className="border-black text-red-600 hover:bg-red-50 text-xs font-mono font-semibold"
+          >
+            <LogOut className="w-3.5 h-3.5 mr-1" />
+            LEAVE
+          </Button>
+        </div>
+      </header>
+
+      {/* Main Room Layout */}
+      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Music Player & Host Dashboard */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Active Player Card */}
+          <div className="border border-black bg-white p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] relative">
+            {/* Latency & Host Status Bar */}
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 text-xs font-mono">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 ${isConnected ? "bg-black" : "bg-red-500"} animate-pulse`}></span>
+                <span className="font-semibold text-gray-700 uppercase">
+                  {isHost ? "YOU ARE HOST" : "LISTENER MODE (SYNCED)"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 text-gray-500">
+                <Radio className="w-3 h-3" />
+                <span>{audioLatencyMs}ms offset</span>
+              </div>
+            </div>
+
+            {/* Song Info */}
+            <div className="flex gap-4 items-center mb-6">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 bg-gray-100 border border-black flex-shrink-0 flex items-center justify-center overflow-hidden">
+                {currentTrack?.cover ? (
+                  <img src={currentTrack.cover} alt="Cover" className="w-full h-full object-cover grayscale" />
+                ) : (
+                  <Music className="w-8 h-8 text-gray-400" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-black truncate">
+                  {currentTrack ? currentTrack.title : "No Track Selected"}
+                </h2>
+                <p className="text-sm font-medium text-gray-600 truncate mt-0.5">
+                  {currentTrack ? currentTrack.artist : "Queue is empty"}
+                </p>
+                <div className="mt-2 flex items-center gap-2 text-xs font-mono text-gray-500">
+                  <span>ADDED BY:</span>
+                  <span className="font-bold text-black uppercase">{currentTrack?.addedBy || "Host"}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Time progress bar */}
+            <div className="space-y-1.5 mb-6">
+              <input
+                type="range"
+                min={0}
+                max={duration || 100}
+                value={currentTime}
+                onChange={handleSeek}
+                disabled={!isHost}
+                className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black"
+              />
+              <div className="flex justify-between text-xs font-mono text-gray-500">
+                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            {/* Controls Row */}
+            <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsShuffle(!isShuffle)}
+                  className={`p-2 border border-black transition-colors ${
+                    isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
+                  }`}
+                  title="Toggle Shuffle"
+                >
+                  <Shuffle className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Central playback controls */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handlePrevious}
+                  className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
+                  title="Previous Song"
+                >
+                  <SkipBack className="w-5 h-5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleTogglePlay}
+                  className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors"
+                  title={isPlaying ? "Pause" : "Play"}
+                >
+                  {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
+                  title="Next Song"
+                >
+                  <SkipForward className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Volume Slider */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsMuted(!isMuted)}
+                  className="text-black hover:opacity-70"
+                >
+                  {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={isMuted ? 0 : volume}
+                  onChange={(e) => {
+                    setVolume(parseFloat(e.target.value));
+                    setIsMuted(false);
+                  }}
+                  className="w-16 sm:w-20 accent-black cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {!isHost && (
+              <div className="mt-4 p-2.5 bg-gray-50 border border-gray-200 text-xs text-gray-600 font-mono flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-black flex-shrink-0" />
+                <span>Host controls playback. Both of you can add and organize songs in the queue below.</span>
+              </div>
+            )}
+          </div>
+
+          {/* Quick instructions for uploading own file / github tracks */}
+          <div className="border border-gray-300 p-4 bg-gray-50 text-xs font-mono text-gray-600 space-y-1.5">
+            <p className="font-bold text-black uppercase">🎧 Tip for your own music:</p>
+            <p>You can add any MP3 link from GitHub, or upload your local test.mp3 file directly using the "Add Track" button.</p>
+          </div>
+        </div>
+
+        {/* Right Column: Shared Queue & Connected Listeners */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Connected Jam Members */}
+          <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-black" />
+                <span className="font-bold text-xs uppercase tracking-wider">Participants ({users.length})</span>
+              </div>
+              <span className="text-xs font-mono text-gray-500">REALTIME</span>
+            </div>
+
+            <div className="space-y-2 max-h-36 overflow-y-auto">
+              {users.map((user) => (
+                <div
+                  key={user.id}
+                  className="flex items-center justify-between p-2 border border-gray-200 bg-gray-50 text-xs font-mono"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-2 h-2 bg-black"></div>
+                    <span className="font-semibold text-black truncate">
+                      {user.name} {user.id === myId ? "(You)" : ""}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {user.isHost ? (
+                      <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                        Host
+                      </span>
+                    ) : isHost ? (
+                      <button
+                        onClick={() => handleTransferHost(user.id)}
+                        className="text-gray-600 hover:text-black text-[10px] underline"
+                      >
+                        Make Host
+                      </button>
+                    ) : (
+                      <span className="text-gray-400 text-[10px]">Listener</span>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
-        </div>
 
-        {/* Music Player Card */}
-        <Card className="mb-6 bg-white border-gray-300">
-          <CardHeader className="pb-4 border-b border-gray-200">
-            <CardTitle className="text-xl text-black">Now Playing</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-6">
-            {currentSongIndex >= 0 && currentSongIndex < playlist.length ? (
-              <>
-                <div className="text-center">
-                  <h2 className="text-lg font-semibold text-black">{playlist[currentSongIndex].title}</h2>
-                  <p className="text-gray-600">{playlist[currentSongIndex].artist}</p>
-                </div>
-                
-                <div className="flex items-center justify-center space-x-6">
-                  <Button variant="ghost" onClick={handleSkipPrevious} size="icon" aria-label="Previous" className="text-black hover:bg-gray-100">
-                    <SkipBack className="h-5 w-5" />
+          {/* Shared Playlist Queue */}
+          <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
+              <span className="font-bold text-xs uppercase tracking-wider">Shared Queue ({queue.length})</span>
+              
+              {/* Add Song Modal Trigger */}
+              <Dialog open={addSongOpen} onOpenChange={setAddSongOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold px-3 py-1">
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    ADD TRACK
                   </Button>
-                  
-                  <Button 
-                    onClick={handlePlayPause} 
-                    className="w-14 h-14 bg-black hover:bg-gray-800 flex items-center justify-center"
-                    aria-label={isPlaying ? "Pause" : "Play"}
-                  >
-                    {isPlaying ? (
-                      <Pause className="h-6 w-6 text-white" />
-                    ) : (
-                      <Play className="h-6 w-6 text-white" />
-                    )}
-                  </Button>
-                  
-                  <Button variant="ghost" onClick={handleSkipNext} size="icon" aria-label="Next" className="text-black hover:bg-gray-100">
-                    <SkipForward className="h-5 w-5" />
-                  </Button>
-                </div>
-                
-                <div className="flex items-center justify-between px-4 text-sm text-gray-500">
-                  <span>0:00</span>
-                  <span>0:00</span>
-                </div>
-                
-                <div className="flex items-center justify-between px-4">
-                  <Button variant="ghost" onClick={handleShuffleToggle} size="icon" 
-                    className={`${isShuffle ? "text-black bg-gray-200" : "text-gray-600 hover:bg-gray-100 hover:text-black"}`}>
-                    <Shuffle className="h-5 w-5" />
-                  </Button>
-                  
-                  <div className="flex items-center gap-2">
-                    <Volume2 className="h-4 w-4 text-gray-600" />
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="1" 
-                      step="0.01" 
-                      value={volume} 
-                      onChange={(e) => setVolume(parseFloat(e.target.value))}
-                      className="w-20 accent-black"
-                    />
+                </DialogTrigger>
+                <DialogContent className="border border-black bg-white text-black p-6 rounded-none shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-md">
+                  <DialogHeader>
+                    <DialogTitle className="text-lg font-bold tracking-tight uppercase">Add Song to Queue</DialogTitle>
+                  </DialogHeader>
+
+                  <div className="space-y-6 pt-2">
+                    {/* Method 1: Local MP3 file upload */}
+                    <div className="p-4 border border-dashed border-black bg-gray-50 text-center space-y-2">
+                      <Upload className="w-6 h-6 mx-auto text-black" />
+                      <p className="text-xs font-semibold uppercase">Option 1: Upload your local MP3 file</p>
+                      <p className="text-[11px] text-gray-500">Pick any MP3 from your computer or downloads folder</p>
+                      <label className="inline-block mt-2 cursor-pointer bg-black text-white text-xs font-mono px-4 py-2 hover:bg-neutral-800 transition-colors">
+                        Select MP3 File
+                        <input
+                          type="file"
+                          accept="audio/mp3,audio/*"
+                          onChange={handleLocalFileUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="relative flex py-1 items-center">
+                      <div className="flex-grow border-t border-gray-300"></div>
+                      <span className="flex-shrink mx-4 text-gray-400 text-xs font-mono uppercase">Or via URL</span>
+                      <div className="flex-grow border-t border-gray-300"></div>
+                    </div>
+
+                    {/* Method 2: Online or GitHub URL */}
+                    <form onSubmit={handleAddSong} className="space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs font-mono uppercase text-gray-700">Track Title</Label>
+                        <Input
+                          value={songTitle}
+                          onChange={(e) => setSongTitle(e.target.value)}
+                          placeholder="e.g. My Favorite Song"
+                          className="border-gray-300 text-black font-medium"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs font-mono uppercase text-gray-700">Artist</Label>
+                        <Input
+                          value={songArtist}
+                          onChange={(e) => setSongArtist(e.target.value)}
+                          placeholder="e.g. Artist Name"
+                          className="border-gray-300 text-black font-medium"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs font-mono uppercase text-gray-700">Audio Stream / GitHub MP3 URL</Label>
+                        <Input
+                          value={songUrl}
+                          onChange={(e) => setSongUrl(e.target.value)}
+                          placeholder="https://raw.githubusercontent.com/.../song.mp3"
+                          className="border-gray-300 text-black font-mono text-xs"
+                        />
+                      </div>
+                      <Button
+                        type="submit"
+                        className="w-full bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold py-2 mt-2"
+                      >
+                        Add to Queue
+                      </Button>
+                    </form>
                   </div>
-                </div>
-              </>
-            ) : (
-              <div className="text-center py-8">
-                <p className="text-gray-500">No song selected</p>
-                <Button onClick={handleAddToPlaylist} className="mt-4 bg-black hover:bg-gray-800 text-white">
-                  Add to Playlist
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                </DialogContent>
+              </Dialog>
+            </div>
 
-        {/* Playlist Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Playlist */}
-          <Card className="lg:col-span-2 bg-white border-gray-300">
-            <CardHeader className="pb-4 border-b border-gray-200">
-              <div className="flex justify-between items-center">
-                <CardTitle className="text-xl text-black">Playlist</CardTitle>
-                <Button onClick={handleAddToPlaylist} size="sm" variant="outline" className="border-gray-400 text-black hover:bg-gray-100">
-                  Add Song
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2 pt-4">
-              {playlist.length > 0 ? (
-                playlist.map((song, index) => (
-                  <div 
-                    key={song.id} 
-                    className={`flex items-center justify-between px-3 py-2 transition-colors ${
-                      index === currentSongIndex ? "bg-gray-200" : "hover:bg-gray-100"
+            {/* Queue List with Priority Reordering */}
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {queue.map((track, idx) => {
+                const isCurrent = idx === currentIndex;
+                return (
+                  <div
+                    key={track.id}
+                    className={`p-2.5 border transition-colors flex items-center justify-between gap-2 ${
+                      isCurrent
+                        ? "bg-black text-white border-black"
+                        : "bg-white text-black border-gray-200 hover:border-gray-400"
                     }`}
                   >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-black">{song.title}</div>
-                      <div className="text-sm text-gray-600">{song.artist}</div>
+                    <div
+                      onClick={() => {
+                        if (isHost) {
+                          setCurrentIndex(idx);
+                          broadcast({
+                            type: "PLAY",
+                            trackIndex: idx,
+                            seekTime: 0,
+                            timestamp: Date.now(),
+                          });
+                        }
+                      }}
+                      className="min-w-0 flex-1 cursor-pointer"
+                    >
+                      <p className="font-bold text-xs truncate">
+                        {idx + 1}. {track.title}
+                      </p>
+                      <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>
+                        {track.artist}
+                      </p>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {index + 1}/{playlist.length}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-center py-4 text-gray-500">Playlist is empty</p>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* Controls (Host only) */}
-          {!isHost ? null : (
-            <Card className="bg-white border-gray-300">
-              <CardHeader className="pb-4 border-b border-gray-200">
-                <CardTitle className="text-xl text-black">Host Controls</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 pt-4">
-                <Button 
-                  onClick={() => alert("Transfer host feature coming soon!")} 
-                  className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
-                >
-                  Transfer Host
-                </Button>
-                
-                <div className="space-y-2">
-                  <p className="text-sm text-gray-600">Playback Mode:</p>
-                  <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer text-black">
-                      <input 
-                        type="radio" 
-                        checked={!isShuffle} 
-                        onChange={() => setIsShuffle(false)} 
-                        className="h-4 w-4 accent-black"
-                      />
-                      <span>Sequential</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer text-black">
-                      <input 
-                        type="radio" 
-                        checked={isShuffle} 
-                        onChange={() => setIsShuffle(true)} 
-                        className="h-4 w-4 accent-black"
-                      />
-                      <span>Shuffle</span>
-                    </label>
+                    {/* Reorder & Remove Actions */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleReorder(idx, "up")}
+                        disabled={idx === 0}
+                        className={`p-1 border text-xs disabled:opacity-30 ${
+                          isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"
+                        }`}
+                        title="Move Up"
+                      >
+                        <ArrowUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleReorder(idx, "down")}
+                        disabled={idx === queue.length - 1}
+                        className={`p-1 border text-xs disabled:opacity-30 ${
+                          isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"
+                        }`}
+                        title="Move Down"
+                      >
+                        <ArrowDown className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTrack(idx)}
+                        className={`p-1 border text-xs text-red-500 hover:bg-red-50 ${
+                          isCurrent ? "border-white" : "border-gray-300"
+                        }`}
+                        title="Remove"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                );
+              })}
+            </div>
+          </div>
         </div>
-      </div>
+      </main>
 
-      {/* Audio Element */}
-      <audio 
-        ref={setAudioRef} 
-        onEnded={handleSkipNext}
-        preload="metadata"
+      {/* Hidden Audio element controlling synchronization */}
+      <audio
+        ref={audioRef}
+        src={currentTrack?.url}
+        onTimeUpdate={() => {
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime);
+          }
+        }}
+        onLoadedMetadata={() => {
+          if (audioRef.current) {
+            setDuration(audioRef.current.duration);
+          }
+        }}
+        onEnded={handleNext}
       />
+
+      {/* Bottom status strip */}
+      <footer className="border-t border-black py-2.5 px-4 sm:px-8 flex justify-between items-center text-xs font-mono bg-white text-gray-600">
+        <div>CONNECTED AS: <span className="font-bold text-black uppercase">{userName}</span></div>
+        <div>MONOCHROMATIC JAM &bull; LOW LATENCY SYNC</div>
+      </footer>
     </div>
   );
 };
