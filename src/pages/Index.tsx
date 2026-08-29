@@ -15,68 +15,67 @@ const generateRandomCode = () => {
   ).join("");
 };
 
-// Lock-style digit with vertical reel of characters
-const LockDigit = ({ char, direction, delay, totalChars }: { 
-  char: string; 
-  direction: "up" | "down"; 
-  delay: number;
-  totalChars: number;
-}) => {
-  const [isReel, setIsReel] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const animationRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+// Single spinning digit component
+const SpinningDigit = ({ char, direction, delay }: { char: string; direction: "up" | "down"; delay: number }) => {
+  const [displayChar, setDisplayChar] = useState(char);
+  const [isSpinning, setIsSpinning] = useState(false);
+  const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Wait for this digit's individual delay before starting
+    // Wait for this digit's individual delay before starting to spin
     const startTimeout = setTimeout(() => {
-      setIsReel(true);
+      setIsSpinning(true);
+      
+      // Spin through random characters slowly
+      const spinDuration = 1500 + Math.random() * 500; // 1500-2000ms (slower)
+      const intervalSpeed = 150; // How fast characters change (slower)
+      
+      animationRef.current = setInterval(() => {
+        setDisplayChar(ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]);
+      }, intervalSpeed);
+
+      // Stop spinning and show final character
+      timeoutRef.current = setTimeout(() => {
+        if (animationRef.current) {
+          clearInterval(animationRef.current);
+          animationRef.current = null;
+        }
+        setDisplayChar(char);
+        setIsSpinning(false);
+      }, spinDuration);
     }, delay);
 
     return () => {
       clearTimeout(startTimeout);
       if (animationRef.current) {
-        clearTimeout(animationRef.current);
+        clearInterval(animationRef.current);
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
       }
     };
   }, [char, delay]);
 
   return (
-    <span 
-      className="inline-block overflow-hidden align-middle"
-      style={{ 
-        height: "1.2em", 
-        width: "1ch",
-        lineHeight: "1.2em",
+    <span
+      className={`inline-block w-4 text-center transition-all duration-300 ${
+        isSpinning ? "opacity-50" : "opacity-100"
+      }`}
+      style={{
+        transform: isSpinning 
+          ? direction === "up" 
+            ? "translateY(-100%)" 
+            : "translateY(100%)"
+          : "translateY(0)",
       }}
     >
-      <div
-        className="will-change-transform"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          transform: isReel 
-            ? direction === "up"
-              ? `translateY(-${(totalChars * 0.8)}em)`  // Scroll up through many chars
-              : `translateY(${(totalChars * 0.8)}em)`  // Scroll down through many chars
-            : "translateY(0)",
-          transition: `transform ${1500 + Math.random() * 500}ms cubic-bezier(0.16, 1, 0.3, 1)`,
-        }}
-      >
-        {Array.from({ length: totalChars }).map((_, i) => (
-          <span
-            key={i}
-            className="block text-center"
-            style={{ height: "1.2em", lineHeight: "1.2em" }}
-          >
-            {i === totalChars - 1 ? char : ROOM_CODE_CHARS[(i * 7 + ROOM_CODE_CHARS.indexOf(char)) % ROOM_CODE_CHARS.length]}
-          </span>
-        ))}
-      </div>
+      {displayChar}
     </span>
   );
 };
 
-// Animated cycling placeholder for room codes - lock reel style
+// Animated cycling placeholder for room codes - slot machine style
 const CyclingCodePlaceholder = () => {
   const [codes, setCodes] = useState<string[]>(() => [generateRandomCode(), generateRandomCode()]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -94,7 +93,7 @@ const CyclingCodePlaceholder = () => {
       setCodes(prev => [prev[1], newCode]);
       setDirections(newDirections);
       setCurrentIndex(prev => (prev + 1) % 2);
-    }, 4500);
+    }, 4000);
 
     return () => clearInterval(interval);
   }, []);
@@ -104,12 +103,11 @@ const CyclingCodePlaceholder = () => {
   return (
     <span className="inline-block">
       {currentCode.split("").map((char, i) => (
-        <LockDigit 
-          key={`${currentIndex}-${i}`} 
+        <SpinningDigit 
+          key={i} 
           char={char} 
           direction={directions[i]} 
-          delay={i * 250} // Each digit starts 250ms after the previous
-          totalChars={20}
+          delay={i * 200} // Each digit starts 200ms after the previous
         />
       ))}
     </span>
@@ -347,7 +345,7 @@ const Index = () => {
                       {/* Animated placeholder overlay */}
                       {!joinCode && (
                         <div className="absolute inset-0 flex items-center pl-3 pointer-events-none overflow-hidden">
-                          <span className="text-gray-400 font-mono tracking-widest text-sm leading-none">
+                          <span className="text-gray-400 font-mono tracking-widest text-sm">
                             <CyclingCodePlaceholder />
                           </span>
                         </div>
