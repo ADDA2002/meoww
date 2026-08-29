@@ -43,7 +43,9 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
           <Menu className="w-4 h-4" />
         </Button>
       </SheetTrigger>
-      <SheetContent className="border-l border-black bg-white text-black rounded-none p-0">
+      <SheetContent 
+        className="border-l border-black bg-white text-black rounded-none p-0 [&>button]:hidden"
+      >
         <SheetHeader className="border-b border-gray-200 p-4 text-left flex-row items-center justify-between">
           <SheetTitle className="text-lg font-bold uppercase tracking-tight">Room Options</SheetTitle>
           <SheetClose className="p-1 hover:bg-gray-100 transition-colors rounded-sm">
