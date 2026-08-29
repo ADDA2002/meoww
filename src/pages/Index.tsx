@@ -181,7 +181,7 @@ const Index = () => {
 
       {/* Footer */}
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
-        Meoww Together &bull; Monochromatic Audio Streamer
+        Meoww Together
       </footer>
     </div>
   );
