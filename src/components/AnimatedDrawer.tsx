@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Music2, Headphones, ChevronDown, Radio } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useNavigate } from "react-router-dom";
 
 type TabKey = "create" | "join";
 
@@ -32,9 +31,16 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
   const [displayed, setDisplayed] = useState<TabKey | null>(activeTab);
   const [phase, setPhase] = useState<"idle" | "leaving" | "entering">("idle");
   const prevTab = useRef<TabKey | null>(activeTab);
+  const innerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (activeTab === prevTab.current) return;
+
+    // Clear any pending inner timer
+    if (innerTimerRef.current) {
+      clearTimeout(innerTimerRef.current);
+      innerTimerRef.current = null;
+    }
 
     if (activeTab === null) {
       // closing: play leave
@@ -62,15 +68,21 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
       setDisplayed(activeTab);
       setPhase("entering");
       prevTab.current = activeTab;
-      const t2 = setTimeout(() => setPhase("idle"), 700);
-      // store cleanup on the window object hack-free via ref
-      (t1 as any)._t2 = t2;
+      innerTimerRef.current = setTimeout(() => setPhase("idle"), 700);
     }, 380);
     return () => {
       clearTimeout(t1);
-      if ((t1 as any)._t2) clearTimeout((t1 as any)._t2);
     };
   }, [activeTab]);
+
+  // Clean up the inner timer on unmount
+  useEffect(() => {
+    return () => {
+      if (innerTimerRef.current) {
+        clearTimeout(innerTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
