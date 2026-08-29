@@ -868,14 +868,14 @@ const Room = () => {
                   <div className="flex items-center gap-2">
                     {user.isHost ? (
                       <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
-                        Host
+                        HOST
                       </span>
                     ) : isHost ? (
                       <button
                         onClick={() => handleTransferHost(user.id)}
-                        className="text-gray-600 hover:text-black text-[10px] underline"
+                        className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-neutral-800 transition-colors cursor-pointer"
                       >
-                        Make Host
+                        MAKE HOST
                       </button>
                     ) : (
                       <span className="text-gray-400 text-[10px]">Listener</span>
