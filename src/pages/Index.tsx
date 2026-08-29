@@ -36,6 +36,18 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
+      {/* Animated background gradient */}
+      <div className="absolute inset-0 animated-bg pointer-events-none"></div>
+
+      {/* Floating musical notes */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="floating-note absolute text-2xl text-black/5" style={{ left: "10%", top: "20%", animationDelay: "0s" }}>♪</div>
+        <div className="floating-note absolute text-3xl text-black/5" style={{ left: "85%", top: "15%", animationDelay: "1.5s" }}>♫</div>
+        <div className="floating-note absolute text-2xl text-black/5" style={{ left: "20%", top: "70%", animationDelay: "3s" }}>♬</div>
+        <div className="floating-note absolute text-4xl text-black/5" style={{ left: "75%", top: "65%", animationDelay: "4.5s" }}>♪</div>
+        <div className="floating-note absolute text-2xl text-black/5" style={{ left: "50%", top: "40%", animationDelay: "2s" }}>♫</div>
+      </div>
+
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
         <div className="flex items-center gap-2">
