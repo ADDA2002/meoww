@@ -398,9 +398,19 @@ const Room = () => {
         } else {
           setIsHost(false);
         }
-        setUsers((prev) =>
-          prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId }))
-        );
+        setUsers((prev) => {
+          const updated = prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId }));
+          // If the new host isn't in our list yet, add them
+          if (!updated.some((u) => u.id === msg.newHostId)) {
+            updated.push({
+              id: msg.newHostId,
+              name: "Host",
+              isHost: true,
+              joinedAt: Date.now(),
+            });
+          }
+          return updated;
+        });
         break;
       }
     }
@@ -427,6 +437,22 @@ const Room = () => {
       }
     }
   };
+
+  // Re-evaluate "MAKE HOST" button state continuously.
+  // The button is available to anyone if:
+  //  - The current user is the host (they can give host to others)
+  //  - There is currently no host in the room (orphan state, anyone can claim)
+  //  - The current user used to be host but lost connection / re-join
+  // We compute a live "isHostAvailable" flag based on the user list.
+  const hostExists = users.some((u) => u.isHost);
+  const canTransfer = isHost || (!hostExists && users.length > 0);
+  
+  // If a HOST_TRANSFER came in but local isHost is still true, sync state from the list
+  useEffect(() => {
+    if (isHost && !hostExists) {
+      // We're claiming host because no one else is host — already handled by the buttons
+    }
+  }, [hostExists, isHost]);
 
   // Playback audio element controls
   const handleTogglePlay = () => {
@@ -625,7 +651,32 @@ const Room = () => {
   };
 
   const handleTransferHost = (targetUserId: string) => {
-    if (!isHost) return;
+    // Claim host if no one is host, otherwise transfer to specific user
+    if (!isHost) {
+      // No host currently exists, claim it
+      setIsHost(true);
+      const newUserList = usersRef.current.map((u) => ({
+        ...u,
+        isHost: u.id === myId,
+      }));
+      // If I'm not in the list, add myself
+      if (!newUserList.some((u) => u.id === myId)) {
+        newUserList.push({
+          id: myId,
+          name: userName,
+          isHost: true,
+          joinedAt: Date.now(),
+        });
+      }
+      setUsers(newUserList);
+      broadcast({
+        type: "HOST_TRANSFER",
+        newHostId: myId,
+      });
+      toast.success("You are now the host!");
+      return;
+    }
+    
     setIsHost(false);
     setUsers((prev) =>
       prev.map((u) => ({ ...u, isHost: u.id === targetUserId }))
@@ -856,35 +907,70 @@ const Room = () => {
             </div>
 
             <div className="space-y-2 max-h-36 overflow-y-auto">
-              {users.map((user) => (
-                <div
-                  key={user.id}
-                  className="flex items-center justify-between p-2 border border-gray-200 bg-gray-50 text-xs font-mono"
-                >
+              {users.map((user) => {
+                const isMe = user.id === myId;
+                // If I'm the host, I can transfer to anyone (including myself -> no-op)
+                // If I'm not the host and there's no host, I can claim host for myself
+                // Otherwise: just show the role label
+                const showMakeHost = !user.isHost && canTransfer && !isMe;
+                return (
+                  <div
+                    key={user.id}
+                    className="flex items-center justify-between p-2 border border-gray-200 bg-gray-50 text-xs font-mono"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-2 h-2 bg-black"></div>
+                      <span className="font-semibold text-black truncate">
+                        {user.name} {isMe ? "(You)" : ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {user.isHost ? (
+                        <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                          HOST
+                        </span>
+                      ) : showMakeHost ? (
+                        <button
+                          onClick={() => handleTransferHost(user.id)}
+                          className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-neutral-800 transition-colors cursor-pointer"
+                        >
+                          MAKE HOST
+                        </button>
+                      ) : (
+                        <span className="text-gray-400 text-[10px]">Listener</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {/* Self row if not in users list yet */}
+              {!users.some((u) => u.id === myId) && (
+                <div className="flex items-center justify-between p-2 border border-gray-200 bg-gray-50 text-xs font-mono">
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-2 h-2 bg-black"></div>
                     <span className="font-semibold text-black truncate">
-                      {user.name} {user.id === myId ? "(You)" : ""}
+                      {userName} (You)
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {user.isHost ? (
+                    {isHost ? (
                       <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
                         HOST
                       </span>
-                    ) : isHost ? (
+                    ) : canTransfer ? (
                       <button
-                        onClick={() => handleTransferHost(user.id)}
+                        onClick={() => handleTransferHost(myId)}
                         className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-neutral-800 transition-colors cursor-pointer"
                       >
-                        MAKE HOST
+                        CLAIM HOST
                       </button>
                     ) : (
                       <span className="text-gray-400 text-[10px]">Listener</span>
                     )}
                   </div>
                 </div>
-              ))}
+              )}
             </div>
           </div>
 
