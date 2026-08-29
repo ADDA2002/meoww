@@ -1,13 +1,13 @@
 import React from "react";
-import { X, Copy, Check, LogOut, Settings } from "lucide-react";
+import { Menu, Copy, Check, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
+  SheetTrigger,
 } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
 
 interface RoomDrawerProps {
   roomCode: string;
@@ -32,44 +32,21 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      {/*
-        We render the trigger ourselves (not asChild) so it can be:
-        - Inline (right-aligned) when the sheet is closed
-        - Absolutely positioned at the EXACT same spot as shadcn's default
-          close button (right-3 top-3, 32x32, centered) when the sheet is open.
-        This guarantees the open and close controls sit in pixel-identical positions.
-      */}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-label={open ? "Close room options" : "Open room options"}
-        className={cn(
-          "border border-black bg-white text-black rounded-md",
-          "hover:bg-gray-100 transition-colors",
-          "flex items-center justify-center",
-          // Closed: normal header button, right-aligned by the parent's flex
-          !open && "h-8 px-2 text-xs font-mono font-semibold",
-          // Open: mirror the default shadcn close button position exactly
-          open && "fixed right-3 top-3 z-50 h-8 w-8 p-0"
-        )}
-      >
-        {open ? (
-          <X className="h-4 w-4" />
-        ) : (
-          <Settings className="h-4 w-4" />
-        )}
-      </button>
-
-      <SheetContent
-        hideClose
-        className="border-l border-black bg-white text-black rounded-none p-0"
-      >
-        <SheetHeader className="border-b border-gray-200 p-4 pr-14 text-left">
-          <SheetTitle className="text-lg font-bold uppercase tracking-tight">
-            Room Options
-          </SheetTitle>
+      <SheetTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
+          aria-label="Open room options"
+        >
+          <Menu className="w-4 h-4" />
+        </Button>
+      </SheetTrigger>
+      <SheetContent className="border-l border-black bg-white text-black rounded-none p-0">
+        <SheetHeader className="border-b border-gray-200 p-4 text-left">
+          <SheetTitle className="text-lg font-bold uppercase tracking-tight">Room Options</SheetTitle>
         </SheetHeader>
-
+        
         <div className="p-4 space-y-6">
           {/* Room Code Section */}
           <div className="space-y-3">
