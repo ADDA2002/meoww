@@ -93,11 +93,9 @@ const Index = () => {
             <div className="relative">
               {/* Create Room Drawer */}
               <div
-                className="overflow-hidden transition-all duration-500 ease-out"
-                style={{
-                  maxHeight: activeTab === "create" ? "300px" : "0",
-                  opacity: activeTab === "create" ? 1 : 0,
-                }}
+                className={`overflow-hidden transition-all duration-500 ease-out ${
+                  activeTab === "create" ? "max-h-[300px] opacity-100" : "max-h-0 opacity-0"
+                }`}
               >
                 <div className="p-6">
                   <form onSubmit={handleCreateRoom} className="space-y-4">
@@ -127,11 +125,9 @@ const Index = () => {
 
               {/* Join Room Drawer */}
               <div
-                className="overflow-hidden transition-all duration-500 ease-out"
-                style={{
-                  maxHeight: activeTab === "join" ? "350px" : "0",
-                  opacity: activeTab === "join" ? 1 : 0,
-                }}
+                className={`overflow-hidden transition-all duration-500 ease-out ${
+                  activeTab === "join" ? "max-h-[350px] opacity-100" : "max-h-0 opacity-0"
+                }`}
               >
                 <div className="p-6">
                   <form onSubmit={handleJoinRoom} className="space-y-4">
