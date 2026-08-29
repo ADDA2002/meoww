@@ -60,9 +60,24 @@ const Index = () => {
             <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
               Meoww Together
             </h1>
-            <p className="text-gray-600 text-sm max-w-md mx-auto">
-              Synchronized, zero-budget music listening room for couples and friends.
+            <p className="text-gray-600 text-sm max-w-md mx-auto mb-6">
+              Synchronized listening rooms for two.
             </p>
+
+            {/* ASCII Cat Face */}
+            <pre
+              aria-label="ASCII cat face"
+              className="inline-block font-mono text-black text-[10px] sm:text-xs leading-tight whitespace-pre select-none"
+            >
+{`    /\\_____/\\
+   /  o   o  \\
+  ( ==  ^  == )
+   )         (
+  (           )
+ ( (  )   (  ) )
+(__(__)___(__)__)
+  cat: ready  `}
+            </pre>
           </div>
 
           {/* Tab Strip + Curtain Drawers */}
