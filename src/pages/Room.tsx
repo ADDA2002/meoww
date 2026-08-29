@@ -106,7 +106,7 @@ const Room = () => {
     });
   };
 
-  // Generate a unique name by adding a number prefix if there's a conflict
+  // Generate a unique name by adding a number suffix with a space if there's a conflict
   const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
     const normalizedBase = baseName.trim().toLowerCase();
     const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
@@ -116,16 +116,16 @@ const Room = () => {
       return baseName;
     }
     
-    // Try adding numbers in front until we find a unique one
+    // Try adding numbers at the back with a single space until we find a unique one
     for (let i = 1; i <= 999; i++) {
-      const candidate = `${i}${baseName}`;
+      const candidate = `${baseName} ${i}`;
       if (!existingNames.includes(candidate.toLowerCase())) {
         return candidate;
       }
     }
     
     // Fallback: add timestamp suffix
-    return `${baseName}${Date.now()}`;
+    return `${baseName} ${Date.now()}`;
   };
 
   // 1. Initialize PeerJS connection
