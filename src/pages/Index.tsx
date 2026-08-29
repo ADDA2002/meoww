@@ -51,14 +51,12 @@ const Index = () => {
       {/* Main Container */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
         <div className="w-full max-w-xl">
-          {/* Hero - GIF as the title */}
+          {/* Hero text */}
           <div className="text-center mb-8">
-            <img
-              src="/o6m.gif"
-              alt="Jam Together"
-              className="mx-auto h-16 sm:h-20 w-auto"
-            />
-            <p className="text-gray-600 text-sm max-w-md mx-auto mt-3">
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
+              Jam Together
+            </h1>
+            <p className="text-gray-600 text-sm max-w-md mx-auto">
               Synchronized, zero-budget music listening room for couples and friends.
             </p>
           </div>
@@ -184,6 +182,15 @@ const Index = () => {
               <span className="font-bold text-black block mb-1">03. FREE</span>
               No ads, 0 data stored
             </div>
+          </div>
+
+          {/* GIF above footer */}
+          <div className="mt-8 flex justify-center">
+            <img 
+              src="/o6m.gif" 
+              alt="Jam Together" 
+              className="max-w-full h-auto"
+            />
           </div>
         </div>
       </div>
