@@ -56,8 +56,19 @@ const Index = () => {
             <img
               src="/1kLR.gif"
               alt="Jam mascot"
-              className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-4"
+              className={`mx-auto mb-4 transition-all duration-500 ${
+                activeTab
+                  ? "w-16 h-16 sm:w-20 sm:h-20"
+                  : "w-20 h-20 sm:w-24 sm:h-24"
+              }`}
             />
+            {activeTab && (
+              <p className="text-xs text-gray-500 font-mono mb-2 animate-pulse">
+                {activeTab === "create"
+                  ? "🎵 Let's start a new jam session!"
+                  : "🔗 Time to join the party!"}
+              </p>
+            )}
             <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
               Jam Together
             </h1>
