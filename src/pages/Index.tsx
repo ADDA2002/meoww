@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
-import GalaxyEffect from "@/components/GalaxyEffect";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -36,48 +35,43 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col justify-between relative overflow-hidden">
-      {/* Galaxy background */}
-      <div className="absolute inset-0 z-0">
-        <GalaxyEffect density="medium" />
-      </div>
-
+    <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       {/* Header Bar */}
-      <header className="border-b border-white/10 px-6 py-4 flex items-center justify-between relative z-10 bg-black/30 backdrop-blur-sm">
+      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-white"></div>
+          <div className="w-3 h-3 bg-black"></div>
           <span className="font-bold tracking-wider text-sm uppercase">Jam Session</span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-white/60 font-mono">
-          <Radio className="w-3.5 h-3.5 animate-pulse text-white" />
+        <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
+          <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
           <span>REALTIME P2P AUDIO</span>
         </div>
       </header>
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-10">
+      <div className="flex-1 flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-xl">
           {/* Hero text */}
           <div className="text-center mb-8">
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight mb-2">
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-black tracking-tight mb-2">
               Jam Together
             </h1>
-            <p className="text-white/60 text-sm max-w-md mx-auto">
+            <p className="text-gray-600 text-sm max-w-md mx-auto">
               Synchronized, zero-budget music listening room for couples and friends.
             </p>
           </div>
 
           {/* Tab Strip + Curtain Drawers */}
           <div 
-            className="border border-white/30 overflow-hidden bg-black/60 backdrop-blur-md shadow-[0_0_40px_rgba(120,80,200,0.25)] transition-all duration-300"
+            className="border border-black overflow-hidden bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all duration-300"
           >
-            <div className="flex border-b border-white/20">
+            <div className="flex border-b border-black">
               {/* Create Room Tab */}
               <button
                 type="button"
                 onClick={() => handleTabClick("create")}
-                className={`flex-1 py-4 px-4 flex items-center justify-center gap-2 transition-colors border-r border-white/20 font-semibold text-sm uppercase tracking-wider ${
-                  activeTab === "create" ? "bg-white text-black" : "bg-transparent text-white hover:bg-white/10"
+                className={`flex-1 py-4 px-4 flex items-center justify-center gap-2 transition-colors border-r border-black font-semibold text-sm uppercase tracking-wider ${
+                  activeTab === "create" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
               >
                 <span>Create Room</span>
@@ -89,7 +83,7 @@ const Index = () => {
                 type="button"
                 onClick={() => handleTabClick("join")}
                 className={`flex-1 py-4 px-4 flex items-center justify-center gap-2 transition-colors font-semibold text-sm uppercase tracking-wider ${
-                  activeTab === "join" ? "bg-white text-black" : "bg-transparent text-white hover:bg-white/10"
+                  activeTab === "join" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
               >
                 <span>Join Room</span>
@@ -107,7 +101,7 @@ const Index = () => {
               >
                 <form onSubmit={handleCreateRoom} className="space-y-4">
                   <div className="space-y-1.5">
-                    <Label htmlFor="create-name" className="text-xs font-mono uppercase text-white/70">
+                    <Label htmlFor="create-name" className="text-xs font-mono uppercase text-gray-700">
                       Your Nickname
                     </Label>
                     <Input
@@ -115,13 +109,13 @@ const Index = () => {
                       value={createName}
                       onChange={(e) => setCreateName(e.target.value)}
                       placeholder="e.g. Alex"
-                      className="bg-white/5 border-white/20 text-white placeholder-white/30 focus:border-white/50 font-medium"
+                      className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
                       autoFocus={activeTab === "create"}
                     />
                   </div>
                   <Button
                     type="submit"
-                    className="w-full bg-white hover:bg-white/90 text-black font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
+                    className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
                     disabled={!createName.trim()}
                   >
                     Start Session as Host
@@ -137,7 +131,7 @@ const Index = () => {
               >
                 <form onSubmit={handleJoinRoom} className="space-y-4">
                   <div className="space-y-1.5">
-                    <Label htmlFor="join-name" className="text-xs font-mono uppercase text-white/70">
+                    <Label htmlFor="join-name" className="text-xs font-mono uppercase text-gray-700">
                       Your Nickname
                     </Label>
                     <Input
@@ -145,12 +139,12 @@ const Index = () => {
                       value={joinName}
                       onChange={(e) => setJoinName(e.target.value)}
                       placeholder="e.g. Taylor"
-                      className="bg-white/5 border-white/20 text-white placeholder-white/30 focus:border-white/50 font-medium"
+                      className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
                       autoFocus={activeTab === "join"}
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="join-code" className="text-xs font-mono uppercase text-white/70">
+                    <Label htmlFor="join-code" className="text-xs font-mono uppercase text-gray-700">
                       6-Letter Room Code
                     </Label>
                     <Input
@@ -159,12 +153,12 @@ const Index = () => {
                       onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                       placeholder="e.g. X9KJ2B"
                       maxLength={8}
-                      className="bg-white/5 border-white/20 text-white uppercase font-mono tracking-widest placeholder-white/30 focus:border-white/50 font-semibold"
+                      className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold"
                     />
                   </div>
                   <Button
                     type="submit"
-                    className="w-full bg-white hover:bg-white/90 text-black font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
+                    className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
                     disabled={!joinName.trim() || !joinCode.trim()}
                   >
                     Join Session
@@ -175,17 +169,17 @@ const Index = () => {
           </div>
 
           {/* Quick info feature card */}
-          <div className="mt-8 grid grid-cols-3 gap-2 text-center text-xs text-white/60 font-mono">
-            <div className="p-3 border border-white/10 bg-white/5 backdrop-blur-sm">
-              <span className="font-bold text-white block mb-1">01. SYNC</span>
+          <div className="mt-8 grid grid-cols-3 gap-2 text-center text-xs text-gray-600 font-mono">
+            <div className="p-3 border border-gray-200 bg-gray-50">
+              <span className="font-bold text-black block mb-1">01. SYNC</span>
               Exact track time alignment
             </div>
-            <div className="p-3 border border-white/10 bg-white/5 backdrop-blur-sm">
-              <span className="font-bold text-white block mb-1">02. CO-OP</span>
+            <div className="p-3 border border-gray-200 bg-gray-50">
+              <span className="font-bold text-black block mb-1">02. CO-OP</span>
               Both can add songs & reorder
             </div>
-            <div className="p-3 border border-white/10 bg-white/5 backdrop-blur-sm">
-              <span className="font-bold text-white block mb-1">03. FREE</span>
+            <div className="p-3 border border-gray-200 bg-gray-50">
+              <span className="font-bold text-black block mb-1">03. FREE</span>
               No ads, 0 data stored
             </div>
           </div>
@@ -193,7 +187,7 @@ const Index = () => {
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-white/10 py-4 px-6 text-center text-xs text-white/40 font-mono relative z-10 bg-black/30 backdrop-blur-sm">
+      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
         Jam Together &bull; Monochromatic Audio Streamer
       </footer>
     </div>
