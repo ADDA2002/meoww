@@ -235,7 +235,7 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
           <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
-          <span>SYNCED AUDIO PARTY</span>
+          <span>SYNCED</span>
         </div>
       </header>
 
@@ -380,7 +380,7 @@ const Index = () => {
             </div>
             <div className="p-3 border border-gray-200 bg-gray-50">
               <span className="font-bold text-black block mb-1">02. CO-OP</span>
-              Both can add songs & reorder
+              All can add songs & reorder
             </div>
             <div className="p-3 border border-gray-200 bg-gray-50">
               <span className="font-bold text-black block mb-1">03. FREE</span>
