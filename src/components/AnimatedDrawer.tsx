@@ -47,7 +47,7 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
         setDisplayed(null);
         setPhase("idle");
         prevTab.current = null;
-      }, 150);
+      }, 380);
       return () => clearTimeout(t);
     }
 
@@ -55,7 +55,7 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
       setDisplayed(activeTab);
       setPhase("entering");
       prevTab.current = activeTab;
-      const t = setTimeout(() => setPhase("idle"), 300);
+      const t = setTimeout(() => setPhase("idle"), 700);
       return () => clearTimeout(t);
     }
 
@@ -65,8 +65,8 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
       setDisplayed(activeTab);
       setPhase("entering");
       prevTab.current = activeTab;
-      innerTimerRef.current = setTimeout(() => setPhase("idle"), 300);
-    }, 150);
+      innerTimerRef.current = setTimeout(() => setPhase("idle"), 700);
+    }, 380);
     return () => {
       clearTimeout(t1);
     };
@@ -97,7 +97,7 @@ const AnimatedDrawer: React.FC<AnimatedDrawerProps> = ({
 
   return (
     <div
-      className={`grid transition-[grid-template-rows] duration-300 ease-out ${
+      className={`grid transition-[grid-template-rows] duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
         displayed ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
       }`}
     >
