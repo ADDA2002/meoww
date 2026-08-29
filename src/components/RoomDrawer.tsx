@@ -1,12 +1,11 @@
 import React from "react";
-import { Menu, Copy, Check, LogOut } from "lucide-react";
+import { X, Menu, Copy, Check, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
 
 interface RoomDrawerProps {
@@ -43,8 +42,20 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
         </Button>
       </SheetTrigger>
       <SheetContent className="border-l border-black bg-white text-black rounded-none p-0">
-        <SheetHeader className="border-b border-gray-200 p-4 text-left">
-          <SheetTitle className="text-lg font-bold uppercase tracking-tight">Room Options</SheetTitle>
+        <SheetHeader className="border-b border-gray-200 p-4 flex flex-row items-center justify-between">
+          <SheetTitle className="text-lg font-bold uppercase tracking-tight m-0">
+            Room Options
+          </SheetTitle>
+          {/* Custom close button matching open button size and border */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-black hover:bg-gray-100 text-xs font-mono font-semibold"
+            aria-label="Close room options"
+            onClick={() => setOpen(false)}
+          >
+            <X className="w-4 h-4" />
+          </Button>
         </SheetHeader>
         
         <div className="p-4 space-y-6">
