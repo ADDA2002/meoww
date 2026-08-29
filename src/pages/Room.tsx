@@ -397,15 +397,15 @@ const Room = () => {
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const targetTime = parseFloat(e.target.value);
     const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = targetTime;
-      setCurrentTime(targetTime);
-      broadcast({
-        type: "SEEK",
-        seekTime: targetTime,
-        timestamp: Date.now(),
-      });
-    }
+    if (!audio || !isFinite(targetTime)) return;
+
+    audio.currentTime = targetTime;
+    setCurrentTime(targetTime);
+    broadcast({
+      type: "SEEK",
+      seekTime: targetTime,
+      timestamp: Date.now(),
+    });
   };
 
   const handleAddSong = (e: React.FormEvent) => {
@@ -548,6 +548,9 @@ const Room = () => {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
+  // Compute a safe max for the range slider — never 0
+  const sliderMax = duration > 0 ? duration : 100;
+
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       {/* Top Room Navigation Bar */}
@@ -655,10 +658,9 @@ const Room = () => {
               <input
                 type="range"
                 min={0}
-                max={duration || 100}
+                max={sliderMax}
                 value={currentTime}
                 onChange={handleSeek}
-                disabled={!isHost}
                 className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black"
               />
               <div className="flex justify-between text-xs font-mono text-gray-500">
