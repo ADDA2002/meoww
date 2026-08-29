@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
+import Peer from "peerjs";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -11,13 +12,66 @@ const Index = () => {
   const [createName, setCreateName] = useState("");
   const [joinName, setJoinName] = useState("");
   const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [isCheckingRoom, setIsCheckingRoom] = useState(false);
 
   const handleTabClick = (tab: "create" | "join") => {
     if (activeTab === tab) {
       setActiveTab(null);
+      setJoinError(null);
     } else {
       setActiveTab(tab);
+      setJoinError(null);
     }
+  };
+
+  // Validate that the room code has the correct format
+  const isValidCodeFormat = (code: string) => {
+    return /^[A-Z0-9]{6}$/.test(code.trim().toUpperCase());
+  };
+
+  // Check if the host's peer actually exists in the PeerJS network
+  const checkRoomExists = (code: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const hostPeerId = `meoww-room-${code.trim().toLowerCase()}`;
+
+      const checkPeer = new Peer({
+        debug: 0,
+      });
+
+      const timeout = setTimeout(() => {
+        try { checkPeer.destroy(); } catch (e) { /* noop */ }
+        resolve(false);
+      }, 6000);
+
+      checkPeer.on("open", () => {
+        const conn = checkPeer.connect(hostPeerId, { reliable: true });
+
+        const settle = (result: boolean) => {
+          clearTimeout(timeout);
+          try { conn.close(); } catch (e) { /* noop */ }
+          try { checkPeer.destroy(); } catch (e) { /* noop */ }
+          resolve(result);
+        };
+
+        conn.on("open", () => settle(true));
+        conn.on("error", (err: any) => {
+          if (err.type === "peer-unavailable" || err.type === "network") {
+            settle(false);
+          }
+        });
+
+        setTimeout(() => settle(false), 5000);
+      });
+
+      checkPeer.on("error", (err: any) => {
+        clearTimeout(timeout);
+        if (err.type === "peer-unavailable") {
+          try { checkPeer.destroy(); } catch (e) { /* noop */ }
+          resolve(false);
+        }
+      });
+    });
   };
 
   const handleCreateRoom = (e: React.FormEvent) => {
@@ -27,11 +81,36 @@ const Index = () => {
     navigate(`/room/${generatedCode}?name=${encodeURIComponent(createName.trim())}&host=true`);
   };
 
-  const handleJoinRoom = (e: React.FormEvent) => {
+  const handleJoinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinName.trim() || !joinCode.trim()) return;
+    setJoinError(null);
+
     const cleanCode = joinCode.trim().toUpperCase();
-    navigate(`/room/${cleanCode}?name=${encodeURIComponent(joinName.trim())}&host=false`);
+
+    if (!joinName.trim() || !cleanCode) {
+      setJoinError("Please enter your nickname and a room code.");
+      return;
+    }
+
+    if (!isValidCodeFormat(cleanCode)) {
+      setJoinError("Invalid room code format. Room codes are 6 letters/numbers (e.g. X9KJ2B).");
+      return;
+    }
+
+    setIsCheckingRoom(true);
+
+    try {
+      const roomExists = await checkRoomExists(cleanCode);
+      if (!roomExists) {
+        setJoinError(`Room "${cleanCode}" doesn't exist. Check the code and try again.`);
+        setIsCheckingRoom(false);
+        return;
+      }
+      navigate(`/room/${cleanCode}?name=${encodeURIComponent(joinName.trim())}&host=false`);
+    } catch (err) {
+      setJoinError("Couldn't verify the room. Check your connection and try again.");
+      setIsCheckingRoom(false);
+    }
   };
 
   return (
@@ -119,7 +198,7 @@ const Index = () => {
               {/* Join Room Drawer */}
               <div 
                 className={`transition-all duration-500 ease-in-out ${
-                  activeTab === "join" ? "max-h-[350px] opacity-100 p-6" : "max-h-0 opacity-0 p-0 overflow-hidden"
+                  activeTab === "join" ? "max-h-[450px] opacity-100 p-6" : "max-h-0 opacity-0 p-0 overflow-hidden"
                 }`}
               >
                 <form onSubmit={handleJoinRoom} className="space-y-4">
@@ -130,7 +209,10 @@ const Index = () => {
                     <Input
                       id="join-name"
                       value={joinName}
-                      onChange={(e) => setJoinName(e.target.value)}
+                      onChange={(e) => {
+                        setJoinName(e.target.value);
+                        setJoinError(null);
+                      }}
                       placeholder="e.g. Taylor"
                       className="bg-gray-50 border-gray-300 text-black placeholder-gray-400 focus:border-black font-medium"
                       autoFocus={activeTab === "join"}
@@ -143,18 +225,28 @@ const Index = () => {
                     <Input
                       id="join-code"
                       value={joinCode}
-                      onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                      onChange={(e) => {
+                        setJoinCode(e.target.value.toUpperCase());
+                        setJoinError(null);
+                      }}
                       placeholder="e.g. X9KJ2B"
-                      maxLength={8}
+                      maxLength={6}
                       className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold"
                     />
                   </div>
+
+                  {joinError && (
+                    <div className="border border-red-500 bg-red-50 text-red-700 px-3 py-2 text-xs font-mono">
+                      {joinError}
+                    </div>
+                  )}
+
                   <Button
                     type="submit"
                     className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
-                    disabled={!joinName.trim() || !joinCode.trim()}
+                    disabled={isCheckingRoom || !joinName.trim() || !joinCode.trim()}
                   >
-                    Join Session
+                    {isCheckingRoom ? "Checking room..." : "Join Session"}
                   </Button>
                 </form>
               </div>
