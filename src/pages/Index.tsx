@@ -39,7 +39,7 @@ const Index = () => {
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-black"></div>
+          <img src="/1kLR-ezgif.com-crop.gif" alt="Logo" className="h-8 w-auto" />
           <span className="font-bold tracking-wider text-sm uppercase">Jam Session</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
@@ -182,6 +182,11 @@ const Index = () => {
               <span className="font-bold text-black block mb-1">03. FREE</span>
               No ads, 0 data stored
             </div>
+          </div>
+
+          {/* Bottom GIF */}
+          <div className="mt-8 flex justify-center">
+            <img src="/o6m.gif" alt="Jam Together" className="max-w-full h-auto" />
           </div>
         </div>
       </div>
