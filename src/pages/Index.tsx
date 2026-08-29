@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronDown, Radio, Users } from "lucide-react";
+import { ChevronDown, Radio } from "lucide-react";
+import { FloatingNotes } from "@/components/FloatingNotes";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -36,6 +37,8 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative">
+      <FloatingNotes />
+      
       {/* Header Bar */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-10">
         <div className="flex items-center gap-2">
