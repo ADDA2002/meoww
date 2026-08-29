@@ -172,17 +172,17 @@ const Index = () => {
             </div>
           </div>
 
-          {/* Quick info feature card */}
+          {/* Quick info feature cards with floating animation */}
           <div className="mt-8 grid grid-cols-3 gap-2 text-center text-xs text-gray-600 font-mono">
-            <div className="p-3 border border-gray-200 bg-gray-50">
+            <div className="p-3 border border-gray-200 bg-white feature-float">
               <span className="font-bold text-black block mb-1">01. SYNC</span>
               Exact track time alignment
             </div>
-            <div className="p-3 border border-gray-200 bg-gray-50">
+            <div className="p-3 border border-gray-200 bg-white feature-float-delayed">
               <span className="font-bold text-black block mb-1">02. CO-OP</span>
               Both can add songs & reorder
             </div>
-            <div className="p-3 border border-gray-200 bg-gray-50">
+            <div className="p-3 border border-gray-200 bg-white feature-float-delayed-2">
               <span className="font-bold text-black block mb-1">03. FREE</span>
               No ads, 0 data stored
             </div>

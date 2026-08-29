@@ -104,6 +104,28 @@
   perspective: 1000px;
 }
 
+/* Floating animation for feature cards */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.feature-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+.feature-float-delayed {
+  animation: float 4s ease-in-out 1.3s infinite;
+}
+
+.feature-float-delayed-2 {
+  animation: float 4s ease-in-out 2.6s infinite;
+}
+
 /* Vinyl record continuous rotation */
 @keyframes vinyl-spin {
   from {
