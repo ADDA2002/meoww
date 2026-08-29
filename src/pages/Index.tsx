@@ -183,15 +183,6 @@ const Index = () => {
               No ads, 0 data stored
             </div>
           </div>
-
-          {/* GIF above footer */}
-          <div className="mt-8 flex justify-center">
-            <img 
-              src="/o6m.gif" 
-              alt="Jam Together" 
-              className="max-w-full h-auto"
-            />
-          </div>
         </div>
       </div>
 
