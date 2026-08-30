@@ -34,7 +34,7 @@ export function PlayerControls({
         onClick={onToggleShuffle}
         disabled={!isConnected}
         className={`border border-black transition-colors disabled:opacity-50 ${
-          isShuffle ? "bg-black text-white" : "bg-white text-black"
+          isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
         }`}
       >
         <Shuffle className="w-4 h-4" />
@@ -45,7 +45,7 @@ export function PlayerControls({
         size="icon"
         onClick={onPrevious}
         disabled={!isConnected}
-        className="p-3 border border-black bg-white text-black transition-colors disabled:opacity-50"
+        className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
       >
         <SkipBack className="w-5 h-5" />
       </Button>
@@ -53,7 +53,7 @@ export function PlayerControls({
       <Button
         onClick={onTogglePlay}
         disabled={!isConnected}
-        className="w-14 h-14 border border-black bg-black text-white flex items-center justify-center transition-colors disabled:opacity-50"
+        className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors disabled:opacity-50"
       >
         {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
       </Button>
@@ -63,7 +63,7 @@ export function PlayerControls({
         size="icon"
         onClick={onNext}
         disabled={!isConnected}
-        className="p-3 border border-black bg-white text-black transition-colors disabled:opacity-50"
+        className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
       >
         <SkipForward className="w-5 h-5" />
       </Button>
@@ -74,7 +74,7 @@ export function PlayerControls({
         onClick={onToggleMute}
         disabled={!isConnected}
         className={`border border-black transition-colors disabled:opacity-50 ${
-          isMuted ? "bg-black text-white" : "bg-white text-black"
+          isMuted ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
         }`}
       >
         {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
