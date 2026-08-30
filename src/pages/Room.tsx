@@ -280,7 +280,7 @@ const Room = () => {
     }, 50);
   }, [isHost]);
 
-  // Queue management
+  // Queue management - anyone can add, reorder, remove
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
       id: `track-${Date.now()}`,
@@ -314,9 +314,7 @@ const Room = () => {
   }, [queue, currentIndex, userName, broadcast]);
 
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
-    // Only hosts can reorder
-    if (!isHost) return;
-    
+    // Anyone can reorder
     if (direction === "up" && idx === 0) return;
     if (direction === "down" && idx === queue.length - 1) return;
 
@@ -334,12 +332,10 @@ const Room = () => {
     setQueue(newQueue);
     setCurrentIndex(newActive);
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
-  }, [queue, currentIndex, isHost, broadcast]);
+  }, [queue, currentIndex, broadcast]);
 
   const handleRemoveTrack = useCallback((idx: number) => {
-    // Only hosts can remove tracks
-    if (!isHost) return;
-    
+    // Anyone can remove tracks
     if (queue.length <= 1) {
       toast.error("Queue must have at least one track.");
       return;
@@ -349,10 +345,11 @@ const Room = () => {
     if (idx < currentIndex) newActive = currentIndex - 1;
     else if (idx === currentIndex) newActive = Math.min(currentIndex, newQueue.length - 1);
     
+    isReorderingRef.current = true; // Prevent auto-play
     setQueue(newQueue);
     setCurrentIndex(newActive);
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
-  }, [queue, currentIndex, isHost, broadcast]);
+  }, [queue, currentIndex, broadcast]);
 
   const handleTransferHost = useCallback((targetUserId: string) => {
     if (!isHost) return;
