@@ -437,10 +437,6 @@ const Room = () => {
           </div>
         </div>
       </main>
-
-      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
-        Meoww - Real-Time Audio Sync
-      </footer>
     </div>
   );
 };
