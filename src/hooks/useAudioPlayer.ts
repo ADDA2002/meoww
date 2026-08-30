@@ -15,6 +15,8 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
+  const pendingSeekRef = useRef<number | null>(null);
+  const generationRef = useRef(0);
 
   const onTrackEndedRef = useRef(onTrackEnded);
   onTrackEndedRef.current = onTrackEnded;
@@ -34,10 +36,20 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     audio.addEventListener("loadedmetadata", () => {
       setDuration(audio.duration);
       setIsLoaded(true);
+      // Apply pending seek if any
+      if (pendingSeekRef.current !== null) {
+        audio.currentTime = pendingSeekRef.current;
+        pendingSeekRef.current = null;
+      }
     });
 
     audio.addEventListener("canplay", () => {
       setIsLoaded(true);
+      // Apply pending seek if any
+      if (pendingSeekRef.current !== null) {
+        audio.currentTime = pendingSeekRef.current;
+        pendingSeekRef.current = null;
+      }
     });
 
     audio.addEventListener("waiting", () => {
@@ -73,6 +85,10 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     const audio = audioRef.current;
     if (!audio || !track) return;
 
+    // Increment generation to invalidate any in-flight play() calls
+    generationRef.current += 1;
+    pendingSeekRef.current = null;
+
     // Reset state for new track
     setIsLoaded(false);
     setCurrentTime(0);
@@ -93,11 +109,18 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     const audio = audioRef.current;
     if (!audio) return;
 
+    const myGeneration = generationRef.current;
+
     try {
       // Wait for audio to be ready if not loaded
       if (!isLoaded) {
         await new Promise<void>((resolve) => {
           const checkLoaded = () => {
+            // If generation changed, track changed, abort
+            if (myGeneration !== generationRef.current) {
+              resolve();
+              return;
+            }
             if (audio.readyState >= 3) { // HAVE_FUTURE_DATA
               resolve();
             } else {
@@ -106,6 +129,17 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
           };
           checkLoaded();
         });
+      }
+
+      // Check if generation changed while we were waiting
+      if (myGeneration !== generationRef.current) {
+        return; // Track changed, this play() is stale
+      }
+
+      // Apply pending seek right before playing
+      if (pendingSeekRef.current !== null) {
+        audio.currentTime = pendingSeekRef.current;
+        pendingSeekRef.current = null;
       }
 
       await audio.play();
@@ -126,8 +160,15 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
   const seek = useCallback((time: number) => {
     const audio = audioRef.current;
     if (!audio) return;
-    audio.currentTime = time;
-    setCurrentTime(time);
+    
+    // If audio is loaded, seek immediately
+    if (audio.readyState >= 1) {
+      audio.currentTime = time;
+      setCurrentTime(time);
+    } else {
+      // Otherwise, store the seek to apply when loaded
+      pendingSeekRef.current = time;
+    }
   }, []);
 
   const getCurrentTime = useCallback(() => {
