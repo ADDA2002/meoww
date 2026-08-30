@@ -337,14 +337,6 @@ const Room = () => {
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
   }, [queue, currentIndex, broadcast]);
 
-  const handleTransferHost = useCallback((targetUserId: string) => {
-    if (!isHost) return;
-    setIsHost(false);
-    setUsers((prev) => prev.map((u) => ({ ...u, isHost: u.id === targetUserId })));
-    broadcast({ type: "HOST_TRANSFER", newHostId: targetUserId });
-    toast.info("Host transferred.");
-  }, [isHost, broadcast]);
-
   const handleLeaveRoom = () => {
     navigate("/");
   };
@@ -419,7 +411,6 @@ const Room = () => {
             users={users}
             myId={myId}
             isHost={isHost}
-            onTransferHost={handleTransferHost}
           />
 
           <QueueList
