@@ -27,4 +27,6 @@ export type SyncMessage =
   | { type: "UPDATE_QUEUE"; queue: Track[]; activeIndex: number }
   | { type: "REQUEST_SYNC"; requesterId: string }
   | { type: "CHAT"; sender: string; text: string; time: string }
-  | { type: "VETO_TOGGLE"; active: boolean; hostId: string };
+  | { type: "VETO_TOGGLE"; active: boolean; hostId: string }
+  | { type: "KICK_USER"; targetId: string; targetName: string; reason?: string }
+  | { type: "BAN_USER"; targetId: string; targetName: string; reason?: string };

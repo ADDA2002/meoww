@@ -43,6 +43,8 @@ const Room = () => {
 
   // Session state
   const [sessionEnded, setSessionEnded] = useState<boolean>(false);
+  const [kicked, setKicked] = useState<boolean>(false);
+  const [banned, setBanned] = useState<boolean>(false);
 
   // Sync refs
   const currentIndexRef = useRef(currentIndex);
@@ -166,6 +168,26 @@ const Room = () => {
         }
         break;
       }
+      case "KICK_USER": {
+        if (msg.targetId === myId) {
+          setKicked(true);
+          toast.error(`You have been kicked by the host${msg.reason ? `: ${msg.reason}` : ""}`);
+        } else {
+          toast.info(`${msg.targetName} has been kicked from the session.`);
+          setUsers(prev => prev.filter(u => u.id !== msg.targetId));
+        }
+        break;
+      }
+      case "BAN_USER": {
+        if (msg.targetId === myId) {
+          setBanned(true);
+          toast.error(`You have been banned from this session${msg.reason ? `: ${msg.reason}` : ""}`);
+        } else {
+          toast.info(`${msg.targetName} has been banned from the session.`);
+          setUsers(prev => prev.filter(u => u.id !== msg.targetId));
+        }
+        break;
+      }
     }
   }, [myId, play, pause, seek]);
 
@@ -175,7 +197,7 @@ const Room = () => {
   }, []);
 
   // Firebase sync hook
-  const { isConnected, broadcast, getUsers } = useFirebaseSync({
+  const { isConnected, broadcast, kickUser, banUser, getUsers } = useFirebaseSync({
     roomCode,
     myId,
     userName,
@@ -383,6 +405,20 @@ const Room = () => {
     broadcast({ type: "VETO_TOGGLE", active: next, hostId: myId });
   }, [isHost, broadcast, myId]);
 
+  // Moderation - Kick user
+  const handleKickUser = useCallback((targetId: string, targetName: string) => {
+    if (!isHost) return;
+    kickUser(targetId, targetName);
+    toast.info(`Kicked ${targetName} from the session.`);
+  }, [isHost, kickUser]);
+
+  // Moderation - Ban user
+  const handleBanUser = useCallback((targetId: string, targetName: string) => {
+    if (!isHost) return;
+    banUser(targetId, targetName);
+    toast.info(`Banned ${targetName} from the session.`);
+  }, [isHost, banUser]);
+
   const handleLeaveRoom = () => {
     navigate("/");
   };
@@ -431,6 +467,78 @@ const Room = () => {
     );
   }
 
+  // Kicked Screen
+  if (kicked) {
+    return (
+      <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
+        <div className="max-w-md text-center space-y-6">
+          <div className="w-20 h-20 mx-auto bg-amber-100 border-2 border-amber-400 flex items-center justify-center">
+            <Radio className="w-10 h-10 text-amber-600" />
+          </div>
+          
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold tracking-tight uppercase">You Have Been Kicked</h1>
+            <p className="text-gray-600 font-mono text-sm">
+              The host has removed you from this session. You may rejoin if the host allows it.
+            </p>
+          </div>
+
+          <div className="border border-gray-200 bg-gray-50 p-4 text-left space-y-2">
+            <p className="text-xs font-mono uppercase text-gray-500">What happened?</p>
+            <ul className="text-sm text-gray-700 space-y-1">
+              <li>• The host removed you from this session</li>
+              <li>• Your playback is now stopped</li>
+              <li>• Contact the host if you believe this was a mistake</li>
+            </ul>
+          </div>
+
+          <Button
+            onClick={handleGoHome}
+            className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider"
+          >
+            Return to Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Banned Screen
+  if (banned) {
+    return (
+      <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
+        <div className="max-w-md text-center space-y-6">
+          <div className="w-20 h-20 mx-auto bg-red-100 border-2 border-red-400 flex items-center justify-center">
+            <Radio className="w-10 h-10 text-red-600" />
+          </div>
+          
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold tracking-tight uppercase text-red-600">You Have Been Banned</h1>
+            <p className="text-gray-600 font-mono text-sm">
+              The host has permanently banned you from this session. You cannot rejoin.
+            </p>
+          </div>
+
+          <div className="border border-red-200 bg-red-50 p-4 text-left space-y-2">
+            <p className="text-xs font-mono uppercase text-red-500">What happened?</p>
+            <ul className="text-sm text-gray-700 space-y-1">
+              <li>• You were removed and banned from this session</li>
+              <li>• You cannot rejoin with the same room code</li>
+              <li>• Contact the host if you believe this was a mistake</li>
+            </ul>
+          </div>
+
+          <Button
+            onClick={handleGoHome}
+            className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider"
+          >
+            Return to Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       {/* Header */}
@@ -446,8 +554,12 @@ const Room = () => {
             userName={userName} 
             isHost={isHost}
             vetoActive={vetoActive}
+            users={users}
+            myId={myId}
             onToggleVeto={handleToggleVeto}
-            onLeave={handleLeaveRoom} 
+            onLeave={handleLeaveRoom}
+            onKickUser={handleKickUser}
+            onBanUser={handleBanUser}
           />
         </div>
       </header>

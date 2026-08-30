@@ -1,5 +1,5 @@
 import React from "react";
-import { Menu, Copy, Check, LogOut, X, ShieldAlert, Unlock } from "lucide-react";
+import { Menu, Copy, Check, LogOut, X, ShieldAlert, Unlock, UserX, Ban, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -9,19 +9,37 @@ import {
   SheetClose,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { RoomUser } from "@/types/music";
 
 interface RoomDrawerProps {
   roomCode: string;
   userName: string;
   isHost: boolean;
   vetoActive: boolean;
+  users: RoomUser[];
+  myId: string;
   onToggleVeto: () => void;
   onLeave: () => void;
+  onKickUser: (userId: string, userName: string) => void;
+  onBanUser: (userId: string, userName: string) => void;
 }
 
-const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, isHost, vetoActive, onToggleVeto, onLeave }) => {
+const RoomDrawer: React.FC<RoomDrawerProps> = ({
+  roomCode,
+  userName,
+  isHost,
+  vetoActive,
+  users,
+  myId,
+  onToggleVeto,
+  onLeave,
+  onKickUser,
+  onBanUser,
+}) => {
   const [copied, setCopied] = React.useState(false);
   const [open, setOpen] = React.useState(false);
+  const [kickConfirm, setKickConfirm] = React.useState<string | null>(null);
+  const [banConfirm, setBanConfirm] = React.useState<string | null>(null);
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
@@ -37,6 +55,30 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, isHost, vet
   const handleToggleVeto = () => {
     onToggleVeto();
   };
+
+  const handleKickClick = (userId: string) => {
+    if (kickConfirm === userId) {
+      const user = users.find(u => u.id === userId);
+      onKickUser(userId, user?.name || "User");
+      setKickConfirm(null);
+    } else {
+      setKickConfirm(userId);
+      setBanConfirm(null);
+    }
+  };
+
+  const handleBanClick = (userId: string) => {
+    if (banConfirm === userId) {
+      const user = users.find(u => u.id === userId);
+      onBanUser(userId, user?.name || "User");
+      setBanConfirm(null);
+    } else {
+      setBanConfirm(userId);
+      setKickConfirm(null);
+    }
+  };
+
+  const otherUsers = users.filter(u => u.id !== myId && !u.isHost);
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -60,7 +102,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, isHost, vet
           </SheetClose>
         </SheetHeader>
         
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 max-h-[calc(100vh-80px)] overflow-y-auto">
           {/* Room Code Section */}
           <div className="space-y-3">
             <div className="text-xs font-mono uppercase text-gray-500 tracking-wider">Room Code</div>
@@ -133,6 +175,54 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, isHost, vet
                     }`}
                   />
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Moderation Section - Host Only */}
+          {isHost && otherUsers.length > 0 && (
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                <span className="text-xs font-mono uppercase text-gray-500 tracking-wider">Moderation</span>
+              </div>
+              <p className="text-[11px] font-mono text-gray-500 leading-relaxed">
+                Moderation and Exile: The host acts as the bouncer of the room. If a participant adds unwanted music or disrupts the session, the host can individually kick or ban them from the Jam with a single tap.
+              </p>
+              
+              <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 bg-gray-50">
+                {otherUsers.map((user) => (
+                  <div key={user.id} className="p-2.5 border-b border-gray-200 last:border-b-0 flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-xs truncate">{user.name}</p>
+                      <p className="text-[10px] text-gray-500">Listener</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={() => handleKickClick(user.id)}
+                        className={`p-1.5 text-xs border transition-colors flex items-center gap-1 ${
+                          kickConfirm === user.id
+                            ? "bg-amber-100 border-amber-400 text-amber-700"
+                            : "bg-white border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-100"
+                        }`}
+                      >
+                        <UserX className="w-3 h-3" />
+                        {kickConfirm === user.id ? "CONFIRM?" : "KICK"}
+                      </button>
+                      <button
+                        onClick={() => handleBanClick(user.id)}
+                        className={`p-1.5 text-xs border transition-colors flex items-center gap-1 ${
+                          banConfirm === user.id
+                            ? "bg-red-100 border-red-400 text-red-700"
+                            : "bg-white border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-100"
+                        }`}
+                      >
+                        <Ban className="w-3 h-3" />
+                        {banConfirm === user.id ? "CONFIRM?" : "BAN"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
