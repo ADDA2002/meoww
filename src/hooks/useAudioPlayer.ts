@@ -15,7 +15,6 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-
   const onTrackEndedRef = useRef(onTrackEnded);
   onTrackEndedRef.current = onTrackEnded;
 
@@ -25,9 +24,10 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     audioRef.current = audio;
 
     const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
+      const time = audio.currentTime;
+      setCurrentTime(time);
       if (isHost) {
-        onTimeUpdate?.(audio.currentTime);
+        onTimeUpdate?.(time);
       }
     };
 
@@ -85,15 +85,17 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     };
   }, []);
 
-  // Update track source when track changes
+  // Update track source when track changes - but DON'T auto-play
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !track) return;
 
-    // Reset state for new track
+    // Pause current playback when track changes
+    audio.pause();
     isLoadedRef.current = false;
     setCurrentTime(0);
     setDuration(0);
+    setIsPlaying(false);
 
     audio.src = track.url;
     audio.load();
@@ -108,33 +110,31 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
 
   const play = useCallback(async () => {
     const audio = audioRef.current;
-    if (!audio) return;
-
-    try {
-      // Wait for audio to be ready using ref (not stale state)
-      if (!isLoadedRef.current) {
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error("Timeout waiting for audio to load"));
-          }, 10000);
-
-          const checkLoaded = () => {
-            if (isLoadedRef.current) {
-              clearTimeout(timeout);
-              resolve();
-            } else {
-              setTimeout(checkLoaded, 50);
-            }
-          };
-          checkLoaded();
-        });
+    if (!audio || !isLoadedRef.current) {
+      // Wait for audio to load
+      await new Promise<void>((resolve) => {
+        const checkLoaded = setInterval(() => {
+          if (isLoadedRef.current) {
+            clearInterval(checkLoaded);
+            resolve();
+          }
+        }, 50);
+        
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          clearInterval(checkLoaded);
+          resolve();
+        }, 10000);
+      });
+    }
+    
+    if (audioRef.current) {
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+      } catch (err) {
+        console.error("Play failed:", err);
       }
-
-      await audio.play();
-      setIsPlaying(true);
-    } catch (err) {
-      console.error("Play failed:", err);
-      setIsPlaying(false);
     }
   }, []);
 

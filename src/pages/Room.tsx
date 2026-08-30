@@ -30,7 +30,7 @@ const Room = () => {
   // User states
   const [myId, setMyId] = useState<string>("");
   const [userName] = useState<string>(initialName);
-  const [isHost, setIsHost] = useState<boolean>(initialIsHost);
+  const [isHost] = useState<boolean>(initialIsHost);
   const [users, setUsers] = useState<RoomUser[]>([]);
 
   // Queue states
@@ -38,7 +38,7 @@ const Room = () => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
 
-  // Veto (host's "Let others change what's playing" toggle) - default ON (add-only mode)
+  // Veto - default ON (add-only mode)
   const [vetoActive, setVetoActive] = useState<boolean>(true);
 
   // Session state
@@ -46,14 +46,13 @@ const Room = () => {
   const [kicked, setKicked] = useState<boolean>(false);
   const [banned, setBanned] = useState<boolean>(false);
 
-  // Sync refs
+  // Refs for sync
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
-  const isInitialMount = useRef(true);
-  const isReorderingRef = useRef(false);
   const vetoActiveRef = useRef(vetoActive);
-  const lastSyncTimeRef = useRef<number>(0);
+  const isInitializedRef = useRef(false);
+  const isPlayingRef = useRef(false);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -68,19 +67,24 @@ const Room = () => {
   // Handle track end - advance to next track
   const handleTrackEnded = useCallback(() => {
     if (queueRef.current.length === 0) return;
+    isPlayingRef.current = false;
 
     const nextIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
     setCurrentIndex(nextIdx);
+    
+    // Auto-advance: play next track automatically
+    setTimeout(() => {
+      playRef.current?.();
+    }, 100);
   }, []);
 
-  // Audio player hook
+  // Audio player hook - NO auto-play
   const {
     isPlaying,
     isMuted,
-    isLoaded,
     setIsMuted,
     currentTime,
     duration,
@@ -95,24 +99,17 @@ const Room = () => {
     onTrackEnded: handleTrackEnded,
   });
 
-  // Auto-play when track changes (for auto-advance) - skip initial mount and reordering
-  useEffect(() => {
-    if (!currentTrack) return;
-    
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    
-    if (isReorderingRef.current) {
-      isReorderingRef.current = false;
-      return;
-    }
-    
-    play().catch((err) => {
-      console.warn("Auto-play after track change failed:", err);
-    });
-  }, [currentIndex, currentTrack, play]);
+  isPlayingRef.current = isPlaying;
+
+  // Keep play/pause refs updated
+  const playRef = useRef(play);
+  const pauseRef = useRef(pause);
+  const seekRef = useRef(seek);
+  const broadcastRef = useRef<((msg: SyncMessage) => void) | null>(null);
+
+  playRef.current = play;
+  pauseRef.current = pause;
+  seekRef.current = seek;
 
   // Handle sync messages from Firebase
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
@@ -124,71 +121,60 @@ const Room = () => {
         break;
         
       case "PLAY": {
-        console.log(`[Room] PLAY received - track:${msg.trackIndex}, seek:${msg.seekTime}, ts:${msg.timestamp}`);
+        console.log(`[Room] PLAY - track:${msg.trackIndex}, seek:${msg.seekTime}`);
         
         // Update track index if different
         if (currentIndexRef.current !== msg.trackIndex) {
-          console.log(`[Room] Switching to track ${msg.trackIndex}`);
           setCurrentIndex(msg.trackIndex);
         }
         
         // Calculate latency compensation
         const latency = (Date.now() - msg.timestamp) / 1000;
         const targetTime = Math.max(0, msg.seekTime + latency);
-        console.log(`[Room] Seeking to ${targetTime} (latency: ${latency.toFixed(2)}s)`);
         
-        seek(targetTime);
-        
-        // Auto-play after seeking
+        // Seek to position and play
+        seekRef.current(targetTime);
         setTimeout(() => {
-          play().catch((err) => {
-            console.warn("Play after sync failed:", err);
-          });
-        }, 100);
+          playRef.current?.();
+        }, 50);
         break;
       }
       
       case "PAUSE": {
-        console.log(`[Room] PAUSE received - seek:${msg.seekTime}`);
-        seek(msg.seekTime);
-        pause();
+        console.log(`[Room] PAUSE - seek:${msg.seekTime}`);
+        seekRef.current(msg.seekTime);
+        pauseRef.current?.();
         break;
       }
       
       case "SEEK": {
         const latency = (Date.now() - msg.timestamp) / 1000;
-        seek(msg.seekTime + latency);
+        seekRef.current(msg.seekTime + latency);
         break;
       }
       
       case "UPDATE_QUEUE": {
-        console.log(`[Room] UPDATE_QUEUE received - ${msg.queue.length} tracks`);
-        isReorderingRef.current = true;
+        console.log(`[Room] UPDATE_QUEUE - ${msg.queue.length} tracks`);
         setQueue(msg.queue);
-        if (msg.activeIndex !== undefined && msg.activeIndex !== currentIndexRef.current) {
+        if (msg.activeIndex !== undefined) {
           setCurrentIndex(msg.activeIndex);
         }
         break;
       }
       
       case "VETO_TOGGLE": {
-        console.log(`[Room] VETO_TOGGLE received - active:${msg.active}`);
         setVetoActive(msg.active);
         if (msg.active) {
           if (msg.hostId === myId) {
-            toast.success("Member controls locked. You're in solo mode.");
+            toast.success("Member controls locked.");
           } else {
-            toast("Host restricted controls. You can add songs only.", {
-              icon: "🔒",
-            });
+            toast("Host restricted controls. You can add songs only.", { icon: "🔒" });
           }
         } else {
           if (msg.hostId === myId) {
             toast.success("Member controls restored.");
           } else {
-            toast("Host restored member controls.", {
-              icon: "🔓",
-            });
+            toast("Host restored member controls.", { icon: "🔓" });
           }
         }
         break;
@@ -199,7 +185,7 @@ const Room = () => {
           setKicked(true);
           toast.error(`You have been kicked by the host${msg.reason ? `: ${msg.reason}` : ""}`);
         } else {
-          toast.info(`${msg.targetName} has been kicked from the session.`);
+          toast.info(`${msg.targetName} has been kicked.`);
           setUsers(prev => prev.filter(u => u.id !== msg.targetId));
         }
         break;
@@ -210,17 +196,18 @@ const Room = () => {
           setBanned(true);
           toast.error(`You have been banned from this session${msg.reason ? `: ${msg.reason}` : ""}`);
         } else {
-          toast.info(`${msg.targetName} has been banned from the session.`);
+          toast.info(`${msg.targetName} has been banned.`);
           setUsers(prev => prev.filter(u => u.id !== msg.targetId));
         }
         break;
       }
     }
-  }, [myId, play, pause, seek]);
+  }, [myId]);
 
   // Handle session ended
   const handleSessionEnded = useCallback(() => {
     console.log(`[Room] Session ended`);
+    pauseRef.current?.();
     setSessionEnded(true);
   }, []);
 
@@ -237,7 +224,12 @@ const Room = () => {
     onSessionEnded: handleSessionEnded,
   });
 
-  // Initialize connection and load initial state
+  // Store broadcast ref
+  useEffect(() => {
+    broadcastRef.current = broadcast;
+  }, [broadcast]);
+
+  // Initialize connection
   useEffect(() => {
     if (!roomCode) return;
 
@@ -246,14 +238,15 @@ const Room = () => {
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
     setMyId(generatedId);
-  }, [roomCode]);
+  }, [roomCode, isHost]);
 
   // Load initial state when connected (for members joining mid-session)
   useEffect(() => {
-    if (!isConnected || !myId || isHost) return;
+    if (!isConnected || !myId || isHost || isInitializedRef.current) return;
+    isInitializedRef.current = true;
 
     const loadInitialState = async () => {
-      console.log(`[Room] Loading initial state from Firebase...`);
+      console.log(`[Room] Loading initial state...`);
       
       try {
         const state = await getState();
@@ -261,7 +254,6 @@ const Room = () => {
           console.log(`[Room] Got initial state:`, state);
           
           if (state.queue && state.queue.length > 0) {
-            isReorderingRef.current = true;
             setQueue(state.queue);
           }
           
@@ -273,18 +265,10 @@ const Room = () => {
             setVetoActive(state.vetoActive);
           }
           
-          // If host was playing, sync playback
-          if (state.isPlaying && state.currentTime !== undefined) {
-            console.log(`[Room] Host was playing, syncing...`);
-            // Wait a bit for audio to load, then sync
-            setTimeout(() => {
-              seek(state.currentTime || 0);
-              play().catch(console.warn);
-            }, 500);
-          }
+          // DO NOT auto-play when joining - just load the state
+          // User must explicitly press play
         }
         
-        // Also get current users
         const userList = await getUsers();
         if (userList.length > 0) {
           setUsers(userList);
@@ -295,18 +279,7 @@ const Room = () => {
     };
 
     loadInitialState();
-  }, [isConnected, myId, isHost]);
-
-  // Playback controls
-  const playRef = useRef(play);
-  const pauseRef = useRef(pause);
-  const seekRef = useRef(seek);
-  const broadcastRef = useRef(broadcast);
-
-  playRef.current = play;
-  pauseRef.current = pause;
-  seekRef.current = seek;
-  broadcastRef.current = broadcast;
+  }, [isConnected, myId, isHost, getState, getUsers]);
 
   // Guard: prevent locked members from triggering sync actions
   const requireControlAccess = useCallback((): boolean => {
@@ -320,19 +293,19 @@ const Room = () => {
   const handleTogglePlay = useCallback(() => {
     if (!requireControlAccess()) return;
 
-    if (isPlaying) {
-      pauseRef.current();
-      broadcastRef.current({ type: "PAUSE", seekTime: getCurrentTime() });
+    if (isPlayingRef.current) {
+      pauseRef.current?.();
+      broadcastRef.current?.({ type: "PAUSE", seekTime: getCurrentTime() });
     } else {
-      playRef.current();
-      broadcastRef.current({
+      playRef.current?.();
+      broadcastRef.current?.({
         type: "PLAY",
         trackIndex: currentIndexRef.current,
         seekTime: getCurrentTime(),
         timestamp: Date.now(),
       });
     }
-  }, [isPlaying, getCurrentTime, requireControlAccess]);
+  }, [getCurrentTime, requireControlAccess]);
 
   const handleNext = useCallback(() => {
     if (!requireControlAccess()) return;
@@ -343,14 +316,11 @@ const Room = () => {
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
     setCurrentIndex(nextIdx);
-    pauseRef.current();
-    broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
     setTimeout(() => {
-      seekRef.current(0);
-      playRef.current();
-      broadcastRef.current({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
-    }, 50);
+      playRef.current?.();
+      broadcastRef.current?.({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
+    }, 100);
   }, [requireControlAccess]);
 
   const handlePrevious = useCallback(() => {
@@ -362,37 +332,31 @@ const Room = () => {
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
     setCurrentIndex(prevIdx);
-    pauseRef.current();
-    broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
     setTimeout(() => {
-      seekRef.current(0);
-      playRef.current();
-      broadcastRef.current({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
-    }, 50);
+      playRef.current?.();
+      broadcastRef.current?.({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
+    }, 100);
   }, [requireControlAccess]);
 
   const handleTrackClick = useCallback((idx: number) => {
     if (!requireControlAccess()) return;
 
     setCurrentIndex(idx);
-    pauseRef.current();
-    broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
     setTimeout(() => {
-      seekRef.current(0);
-      playRef.current();
-      broadcastRef.current({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
-    }, 50);
+      playRef.current?.();
+      broadcastRef.current?.({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
+    }, 100);
   }, [requireControlAccess]);
 
   const handleSeekFromBar = useCallback((time: number) => {
     if (!requireControlAccess()) return;
     seekRef.current(time);
-    broadcastRef.current({ type: "SEEK", seekTime: time, timestamp: Date.now() });
+    broadcastRef.current?.({ type: "SEEK", seekTime: time, timestamp: Date.now() });
   }, [requireControlAccess]);
 
-  // Queue management - "Add" stays open to all members even during veto
+  // Queue management - Add is open to all even during veto
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
       id: `track-${Date.now()}`,
@@ -404,7 +368,7 @@ const Room = () => {
 
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
-    broadcastRef.current({ type: "UPDATE_QUEUE", queue: updatedQueue, activeIndex: currentIndexRef.current });
+    broadcastRef.current?.({ type: "UPDATE_QUEUE", queue: updatedQueue, activeIndex: currentIndexRef.current });
     toast.success("Track added!");
   }, [userName]);
 
@@ -421,11 +385,11 @@ const Room = () => {
 
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
-    broadcastRef.current({ type: "UPDATE_QUEUE", queue: updatedQueue, activeIndex: currentIndexRef.current });
+    broadcastRef.current?.({ type: "UPDATE_QUEUE", queue: updatedQueue, activeIndex: currentIndexRef.current });
     toast.success(`Loaded: ${file.name}`);
   }, [userName]);
 
-  // Reorder & Remove are locked for non-host members during veto
+  // Reorder & Remove - locked during veto
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
     if (!requireControlAccess()) return;
     if (direction === "up" && idx === 0) return;
@@ -439,11 +403,9 @@ const Room = () => {
     if (currentIndexRef.current === idx) newActive = targetIdx;
     else if (currentIndexRef.current === targetIdx) newActive = idx;
 
-    isReorderingRef.current = true;
-    
     setQueue(newQueue);
     setCurrentIndex(newActive);
-    broadcastRef.current({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
+    broadcastRef.current?.({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
   }, [requireControlAccess]);
 
   const handleRemoveTrack = useCallback((idx: number) => {
@@ -459,30 +421,28 @@ const Room = () => {
     
     setQueue(newQueue);
     setCurrentIndex(newActive);
-    broadcastRef.current({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
+    broadcastRef.current?.({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
   }, [requireControlAccess]);
 
-  // Host toggles the "Power of Veto"
+  // Host toggles veto
   const handleToggleVeto = useCallback(() => {
     if (!isHost) return;
     const next = !vetoActiveRef.current;
     setVetoActive(next);
     vetoActiveRef.current = next;
-    broadcastRef.current({ type: "VETO_TOGGLE", active: next, hostId: myId });
+    broadcastRef.current?.({ type: "VETO_TOGGLE", active: next, hostId: myId });
   }, [isHost, myId]);
 
-  // Moderation - Kick user
   const handleKickUser = useCallback((targetId: string, targetName: string) => {
     if (!isHost) return;
     kickUser(targetId, targetName);
-    toast.info(`Kicked ${targetName} from the session.`);
+    toast.info(`Kicked ${targetName}.`);
   }, [isHost, kickUser]);
 
-  // Moderation - Ban user
   const handleBanUser = useCallback((targetId: string, targetName: string) => {
     if (!isHost) return;
     banUser(targetId, targetName);
-    toast.info(`Banned ${targetName} from the session.`);
+    toast.info(`Banned ${targetName}.`);
   }, [isHost, banUser]);
 
   const handleLeaveRoom = () => {
@@ -509,23 +469,11 @@ const Room = () => {
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase">Session Ended</h1>
             <p className="text-gray-600 font-mono text-sm">
-              The host has left the session. The Jam cannot exist without the host.
+              The host has left the session.
             </p>
           </div>
 
-          <div className="border border-gray-200 bg-gray-50 p-4 text-left space-y-2">
-            <p className="text-xs font-mono uppercase text-gray-500">What happened?</p>
-            <ul className="text-sm text-gray-700 space-y-1">
-              <li>• The host closed their app or left</li>
-              <li>• The session is now terminated for everyone</li>
-              <li>• Members cannot keep a hostless room alive</li>
-            </ul>
-          </div>
-
-          <Button
-            onClick={handleGoHome}
-            className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider"
-          >
+          <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
           </Button>
         </div>
@@ -545,23 +493,11 @@ const Room = () => {
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase">You Have Been Kicked</h1>
             <p className="text-gray-600 font-mono text-sm">
-              The host has removed you from this session. You may rejoin if the host allows it.
+              The host has removed you from this session.
             </p>
           </div>
 
-          <div className="border border-gray-200 bg-gray-50 p-4 text-left space-y-2">
-            <p className="text-xs font-mono uppercase text-gray-500">What happened?</p>
-            <ul className="text-sm text-gray-700 space-y-1">
-              <li>• The host removed you from this session</li>
-              <li>• Your playback is now stopped</li>
-              <li>• Contact the host if you believe this was a mistake</li>
-            </ul>
-          </div>
-
-          <Button
-            onClick={handleGoHome}
-            className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider"
-          >
+          <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
           </Button>
         </div>
@@ -581,23 +517,11 @@ const Room = () => {
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase text-red-600">You Have Been Banned</h1>
             <p className="text-gray-600 font-mono text-sm">
-              The host has permanently banned you from this session. You cannot rejoin.
+              The host has permanently banned you from this session.
             </p>
           </div>
 
-          <div className="border border-red-200 bg-red-50 p-4 text-left space-y-2">
-            <p className="text-xs font-mono uppercase text-red-500">What happened?</p>
-            <ul className="text-sm text-gray-700 space-y-1">
-              <li>• You were removed and banned from this session</li>
-              <li>• You cannot rejoin with the same room code</li>
-              <li>• Contact the host if you believe this was a mistake</li>
-            </ul>
-          </div>
-
-          <Button
-            onClick={handleGoHome}
-            className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider"
-          >
+          <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
           </Button>
         </div>
