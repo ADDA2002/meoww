@@ -49,6 +49,8 @@ const Room = () => {
   const [isHost, setIsHost] = useState<boolean>(initialIsHost);
   const [users, setUsers] = useState<RoomUser[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [ping, setPing] = useState<number>(0);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // Audio & Queue states
   const [queue, setQueue] = useState<Track[]>(DEFAULT_TRACKS);
@@ -58,7 +60,6 @@ const Room = () => {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
-  const [ping, setPing] = useState<number>(0);
 
   // Add Song Dialog State
   const [addSongOpen, setAddSongOpen] = useState(false);
@@ -74,6 +75,8 @@ const Room = () => {
   const queueRef = useRef<Track[]>(queue);
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
+  const reconnectAttemptsRef = useRef<number>(0);
+  const pingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep refs updated for event callbacks
   usersRef.current = users;
@@ -90,59 +93,25 @@ const Room = () => {
     }
   }, [isMuted]);
 
-  // Ping measurement (listeners only)
+  // Cleanup ping timeout on unmount
   useEffect(() => {
-    if (isHost) return; // Only listeners ping the host
-
-    const measurePing = () => {
-      const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-      const testPeer = new Peer(`${myId}-ping-${Date.now()}`, { debug: 0 });
-      
-      const timeout = setTimeout(() => {
-        try { testPeer.destroy(); } catch (e) { /* noop */ }
-        setPing((prev) => prev || 0);
-      }, 2000);
-
-      testPeer.on("open", () => {
-        const startTime = Date.now();
-        const conn = testPeer.connect(hostPeerId, { reliable: true });
-
-        conn.on("open", () => {
-          clearTimeout(timeout);
-          const endTime = Date.now();
-          setPing(endTime - startTime);
-          try { conn.close(); } catch (e) { /* noop */ }
-          try { testPeer.destroy(); } catch (e) { /* noop */ }
-        });
-
-        conn.on("error", () => {
-          clearTimeout(timeout);
-          try { testPeer.destroy(); } catch (e) { /* noop */ }
-        });
-      });
-
-      testPeer.on("error", () => {
-        clearTimeout(timeout);
-        try { testPeer.destroy(); } catch (e) { /* noop */ }
-      });
-    };
-
-    const initialTimer = setTimeout(measurePing, 1000);
-    const interval = setInterval(measurePing, 5000);
-
     return () => {
-      clearTimeout(initialTimer);
-      clearInterval(interval);
+      if (pingTimeoutRef.current) {
+        clearTimeout(pingTimeoutRef.current);
+      }
     };
-  }, [isHost, roomCode, myId]);
+  }, []);
 
   // Broadcast message to all active peer connections
   const broadcast = (msg: SyncMessage) => {
+    let sent = 0;
     connectionsRef.current.forEach((conn) => {
       if (conn.open) {
         conn.send(msg);
+        sent++;
       }
     });
+    return sent;
   };
 
   // Generate a unique name by adding a number suffix if there's a conflict
@@ -164,7 +133,42 @@ const Room = () => {
     return baseName + " " + Date.now();
   };
 
-  // 1. Initialize PeerJS connection
+  // Single ping measurement (called once after connection)
+  const measurePingOnce = (peerInstance: Peer) => {
+    if (isHostRef.current) {
+      // Host doesn't ping itself
+      return;
+    }
+
+    if (pingTimeoutRef.current) {
+      clearTimeout(pingTimeoutRef.current);
+    }
+
+    pingTimeoutRef.current = setTimeout(() => {
+      const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
+      const startTime = Date.now();
+      const conn = peerInstance.connect(hostPeerId, { reliable: true });
+
+      const fallback = setTimeout(() => {
+        try { conn.close(); } catch (e) { /* noop */ }
+        setPing(0);
+      }, 3000);
+
+      conn.on("open", () => {
+        clearTimeout(fallback);
+        const rtt = Date.now() - startTime;
+        setPing(rtt);
+        try { conn.close(); } catch (e) { /* noop */ }
+      });
+
+      conn.on("error", () => {
+        clearTimeout(fallback);
+        try { conn.close(); } catch (e) { /* noop */ }
+      });
+    }, 1500);
+  };
+
+  // Initialize PeerJS connection
   useEffect(() => {
     if (!roomCode) return;
 
@@ -188,26 +192,36 @@ const Room = () => {
 
     setUsers([currentUser]);
 
-    // Configure PeerJS with better connection settings
+    // Use a more reliable PeerJS server configuration
     const peer = new Peer(generatedId, {
-      debug: 1,
+      debug: 0, // Silence logs to reduce noise
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
         ],
         sdpSemantics: 'unified',
       },
     });
     peerRef.current = peer;
 
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
     peer.on("open", (id) => {
       setIsConnected(true);
+      setConnectionError(null);
+      reconnectAttemptsRef.current = 0;
       
       if (!isHost) {
         const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-        const conn = peer.connect(hostPeerId, { reliable: true });
+        const conn = peer.connect(hostPeerId, { 
+          reliable: true,
+          metadata: { userId: id }
+        });
         setupConnection(conn, currentUser);
+        measurePingOnce(peer);
       }
     });
 
@@ -217,21 +231,47 @@ const Room = () => {
 
     peer.on("error", (err: any) => {
       console.warn("PeerJS error:", err.type, err.message);
+      
       if (err.type === "unavailable-id" && isHost) {
-        toast.error("Room host already active. Joining as listener.");
-        setIsHost(false);
-      } else if (err.type === "peer-unavailable") {
-        toast.error("Room not found. Please check the code.");
-      } else if (err.type === "network" || err.type === "server-error") {
-        toast.error("Connection issues. Check your internet connection.");
+        setConnectionError("This room is already hosted elsewhere. Try joining as a listener.");
+      } else if (err.type === "peer-unavailable" && !isHost) {
+        // Listener can't find host - retry with backoff
+        if (reconnectAttemptsRef.current < 3) {
+          reconnectAttemptsRef.current++;
+          const delay = 1500 * reconnectAttemptsRef.current;
+          toast.error(`Host not reachable. Retrying in ${delay / 1000}s... (${reconnectAttemptsRef.current}/3)`);
+          
+          reconnectTimer = setTimeout(() => {
+            if (peerRef.current && !peerRef.current.destroyed) {
+              const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
+              const conn = peerRef.current.connect(hostPeerId, { reliable: true });
+              setupConnection(conn, currentUser);
+            }
+          }, delay);
+        } else {
+          setConnectionError(`Could not reach room "${roomCode}". Check the code and your connection.`);
+        }
+      } else if (err.type === "network" || err.type === "server-error" || err.type === "socket-error") {
+        setConnectionError("Network unstable. Trying to reconnect...");
       } else if (err.type === "browser-incompatible") {
-        toast.error("Your browser doesn't support WebRTC.");
-      } else {
-        toast.error("Connection notice: " + (err.message || "Working in local mode."));
+        setConnectionError("Your browser doesn't support WebRTC. Try Chrome or Firefox.");
+      } else if (err.type === "ssl-unavailable") {
+        setConnectionError("SSL error. Check your connection security.");
+      }
+    });
+
+    peer.on("disconnected", () => {
+      setIsConnected(false);
+      // Auto-reconnect to PeerJS server (peer object can be reused)
+      if (peerRef.current && !peerRef.current.destroyed) {
+        setTimeout(() => {
+          try { peerRef.current?.reconnect(); } catch (e) { /* noop */ }
+        }, 1000);
       }
     });
 
     return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       peer.destroy();
     };
   }, [roomCode]);
@@ -277,6 +317,7 @@ const Room = () => {
 
     conn.on("error", (err: any) => {
       console.warn("Connection error:", err);
+      connectionsRef.current.delete(conn.peer);
     });
   };
 
@@ -312,12 +353,10 @@ const Room = () => {
             toast.info(`${newUser.name} joined the jam!`);
           }
 
-          if (isHostRef.current) {
-            broadcast({
-              type: "USER_LIST",
-              users: updatedUsers,
-            });
-          }
+          broadcast({
+            type: "USER_LIST",
+            users: updatedUsers,
+          });
           break;
         }
 
@@ -661,6 +700,14 @@ const Room = () => {
         </div>
       </header>
 
+      {/* Connection Error Banner */}
+      {connectionError && (
+        <div className="bg-red-50 border-b border-red-300 px-6 py-3 text-xs font-mono text-red-800 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span className="font-semibold uppercase">{connectionError}</span>
+        </div>
+      )}
+
       {/* Main Room Layout */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Music Player & Host Dashboard */}
@@ -676,7 +723,7 @@ const Room = () => {
                 </span>
               </div>
               <div className="flex items-center gap-1 text-gray-500">
-                <span>ping {ping}ms</span>
+                <span>{ping > 0 ? `ping ${ping}ms` : "—"}</span>
               </div>
             </div>
 
