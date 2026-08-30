@@ -78,6 +78,8 @@ const Room = () => {
   const currentIndexRef = useRef<number>(currentIndex);
   const currentTimeRef = useRef<number>(currentTime);
   const isPlayingRef = useRef<boolean>(isPlaying);
+  // Flag to prevent the "pause on track change" effect from stopping programmatic playback
+  const skipPauseOnChangeRef = useRef<boolean>(false);
 
   // Keep refs updated
   usersRef.current = users;
@@ -99,13 +101,20 @@ const Room = () => {
   // ALWAYS reset to 0:00 when track changes
   useEffect(() => {
     setCurrentTime(0);
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
+    const audio = audioRef.current;
+    if (!audio) return;
+    
+    audio.currentTime = 0;
+    
+    // If this change was triggered by a programmatic play (next/previous/track click),
+    // don't pause - just let the existing play() call take effect.
+    if (skipPauseOnChangeRef.current) {
+      skipPauseOnChangeRef.current = false;
+      return;
     }
-    // Always pause when track changes - user must press play
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
+    
+    // Otherwise, pause on track change (user must press play)
+    audio.pause();
     setIsPlaying(false);
   }, [currentIndex]);
 
@@ -294,6 +303,39 @@ const Room = () => {
     }
   };
 
+  // Play a specific track index and start playback
+  const playTrackAt = (idx: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    
+    // Mark this change as programmatic so the effect doesn't pause
+    skipPauseOnChangeRef.current = true;
+    setCurrentIndex(idx);
+    setCurrentTime(0);
+    audio.currentTime = 0;
+    
+    // Use loadedmetadata to ensure the audio is ready
+    const startPlayback = () => {
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
+      }).catch((err) => {
+        console.error("Play failed:", err);
+        setIsPlaying(false);
+      });
+    };
+    
+    if (audio.readyState >= 2) {
+      startPlayback();
+    } else {
+      audio.addEventListener('loadedmetadata', startPlayback, { once: true });
+      // Fallback in case loadedmetadata already fired
+      setTimeout(() => {
+        if (audio.paused) startPlayback();
+      }, 100);
+    }
+  };
+
   // Auto-play next track when current ends
   const handleTrackEnd = () => {
     if (queue.length === 0) return;
@@ -301,16 +343,7 @@ const Room = () => {
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex + 1) % queue.length;
     
-    setCurrentIndex(nextIdx);
-    setCurrentTime(0);
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
-      }).catch(() => {});
-    }
+    playTrackAt(nextIdx);
   };
 
   // Playback controls
@@ -338,7 +371,12 @@ const Room = () => {
   };
 
   const handleNext = () => {
-    handleTrackEnd();
+    if (queue.length === 0) return;
+    const nextIdx = isShuffle
+      ? Math.floor(Math.random() * queue.length)
+      : (currentIndex + 1) % queue.length;
+    
+    playTrackAt(nextIdx);
   };
 
   const handlePrevious = () => {
@@ -347,16 +385,7 @@ const Room = () => {
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex - 1 + queue.length) % queue.length;
     
-    setCurrentIndex(prevIdx);
-    setCurrentTime(0);
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
-      }).catch(() => {});
-    }
+    playTrackAt(prevIdx);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -371,16 +400,7 @@ const Room = () => {
 
   const handleTrackClick = (idx: number) => {
     if (!isHost) return;
-    setCurrentIndex(idx);
-    setCurrentTime(0);
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
-      }).catch(() => {});
-    }
+    playTrackAt(idx);
   };
 
   // Queue management
