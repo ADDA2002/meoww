@@ -16,9 +16,7 @@ import {
   Music, 
   Upload, 
   Users,
-  AlertCircle,
-  Menu,
-  X
+  AlertCircle
 } from "lucide-react";
 import Peer, { DataConnection } from "peerjs";
 import { toast } from "sonner";
@@ -36,7 +34,6 @@ import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 import RoomDrawer from "@/components/RoomDrawer";
-import Header from "@/components/Header";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -695,8 +692,24 @@ const Room = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
-      {/* Room page header - single consistent header with logo and Meoww */}
-      <Header />
+      {/* Top Room Navigation Bar */}
+      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20 bg-white">
+        <div className="flex items-center gap-2">
+          <img
+            src="/logo.gif"
+            alt="Meoww Logo"
+            className="w-8 h-8 object-contain"
+          />
+          <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <RoomDrawer
+            roomCode={roomCode}
+            userName={userName}
+            onLeave={handleLeaveRoom}
+          />
+        </div>
+      </header>
 
       {/* Main Room Layout */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -949,85 +962,102 @@ const Room = () => {
                   </div>
                 </DialogContent>
               </Dialog>
+            </div>
 
-              {/* Queue List with Priority Reordering */}
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {queue.map((track, idx) => {
-                  const isCurrent = idx === currentIndex;
-                  return (
+            {/* Queue List with Priority Reordering */}
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {queue.map((track, idx) => {
+                const isCurrent = idx === currentIndex;
+                return (
+                  <div
+                    key={track.id}
+                    className={`p-2.5 border transition-colors flex items-center justify-between gap-2 ${
+                      isCurrent
+                        ? "bg-black text-white border-black"
+                        : "bg-white text-black border-gray-200 hover:border-gray-400"
+                    }`}
+                  >
                     <div
-                      key={track.id}
-                      className={`p-2.5 border transition-colors flex items-center justify-between gap-2 ${
-                        isCurrent
-                          ? "bg-black text-white border-black"
-                          : "bg-white text-black border-gray-200 hover:border-gray-400"
-                        }`}
+                      onClick={() => {
+                        if (isHost) {
+                          setCurrentIndex(idx);
+                          broadcast({
+                            type: "PLAY",
+                            trackIndex: idx,
+                            seekTime: 0,
+                            timestamp: Date.now(),
+                          });
+                        }
+                      }}
+                      className="min-w-0 flex-1 cursor-pointer"
                     >
-                      <div
-                        onClick={() => {
-                          if (isHost) {
-                            setCurrentIndex(idx);
-                            broadcast({
-                              type: "PLAY",
-                              trackIndex: idx,
-                              seekTime: 0,
-                              timestamp: Date.now(),
-                            });
-                          }
-                        }}
-                        className="min-w-0 flex-1 cursor-pointer"
-                      >
-                        <p className="font-bold text-xs truncate">
-                          {idx + 1}. {track.title}
-                        </p>
-                        <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>
-                          {track.artist}
-                        </p>
-                      </div>
-
-                      {/* Reorder & Remove Actions */}
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleReorder(idx, "up")}
-                          disabled={idx === 0}
-                          className={`p-1 border text-xs disabled:opacity-30 ${
-                            isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"
-                          }`}
-                          title="Move Up"
-                        >
-                          <ArrowUp className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleReorder(idx, "down")}
-                          disabled={idx === queue.length - 1}
-                          className={`p-1 border text-xs disabled:opacity-30 ${
-                            isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"
-                          }`}
-                          title="Move Down"
-                        >
-                          <ArrowDown className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveTrack(idx)}
-                          className={`p-1 border text-xs text-red-500 hover:bg-red-50 ${
-                            isCurrent ? "border-white" : "border-gray-300"
-                          }`}
-                          title="Remove"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
+                      <p className="font-bold text-xs truncate">
+                        {idx + 1}. {track.title}
+                      </p>
+                      <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>
+                        {track.artist}
+                      </p>
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* Reorder & Remove Actions */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleReorder(idx, "up")}
+                        disabled={idx === 0}
+                        className={`p-1 border text-xs disabled:opacity-30 ${
+                          isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"
+                        }`}
+                        title="Move Up"
+                      >
+                        <ArrowUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleReorder(idx, "down")}
+                        disabled={idx === queue.length - 1}
+                        className={`p-1 border text-xs disabled:opacity-30 ${
+                          isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"
+                        }`}
+                        title="Move Down"
+                      >
+                        <ArrowDown className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTrack(idx)}
+                        className={`p-1 border text-xs text-red-500 hover:bg-red-50 ${
+                          isCurrent ? "border-white" : "border-gray-300"
+                        }`}
+                        title="Remove"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
       </main>
+
+      {/* Hidden Audio element controlling synchronization */}
+      <audio
+        ref={audioRef}
+        src={currentTrack?.url}
+        onTimeUpdate={() => {
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime);
+          }
+        }}
+        onLoadedMetadata={() => {
+          if (audioRef.current) {
+            setDuration(audioRef.current.duration);
+          }
+        }}
+        onEnded={handleNext}
+      />
 
       {/* Bottom status strip */}
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
