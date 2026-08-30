@@ -224,6 +224,12 @@ const Index = () => {
     }
   };
 
+  // Pad code with empty slots to always show 6 character slots
+  const getCodeSlots = () => {
+    const code = joinCode.padEnd(6, " ").split("");
+    return code;
+  };
+
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
       {/* Header Bar */}
@@ -335,21 +341,39 @@ const Index = () => {
                       6-Letter Room Code
                     </Label>
                     <div className="relative">
-                      <Input
+                      {/* Hidden input for actual typing */}
+                      <input
                         id="join-code"
+                        type="text"
                         value={joinCode}
                         onChange={(e) => {
-                          setJoinCode(e.target.value.toUpperCase());
+                          setJoinCode(e.target.value.toUpperCase().slice(0, 6));
                           setJoinError(null);
                         }}
-                        placeholder=""
                         maxLength={6}
-                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-normal pr-12"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-text z-10"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="characters"
+                        spellCheck="false"
                       />
-                      {/* Animated placeholder overlay */}
+                      {/* Visual display of character slots */}
+                      <div className="flex items-center justify-center gap-1 bg-gray-50 border border-gray-300 h-11 px-2">
+                        {getCodeSlots().map((char, i) => (
+                          <div
+                            key={i}
+                            className="w-6 h-8 flex items-center justify-center bg-white border border-gray-300"
+                          >
+                            <span className="text-gray-800 font-mono text-sm font-normal">
+                              {char === " " ? "" : char}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Animated placeholder overlay - shown only when no code entered */}
                       {!joinCode && (
-                        <div className="absolute inset-0 flex items-center pl-3 pointer-events-none overflow-hidden">
-                          <span className="text-gray-400 font-mono tracking-widest text-sm font-normal">
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+                          <span className="text-gray-400 font-mono text-sm font-normal">
                             <CyclingCodePlaceholder />
                           </span>
                         </div>
