@@ -111,13 +111,13 @@ export function QueueList({
           return (
             <div
               key={track.id}
-              className={`p-2.5 border transition-colors flex items-center justify-between gap-2 ${
-                isCurrent ? "bg-black text-white border-black" : "bg-white text-black border-gray-200 hover:border-gray-400"
+              className={`p-2.5 border flex items-center justify-between gap-2 ${
+                isCurrent ? "bg-black text-white border-black" : "bg-white text-black border-gray-200"
               }`}
             >
               <div 
                 onClick={() => isHost && onTrackClick(idx)} 
-                className={`min-w-0 flex-1 cursor-pointer ${!isHost ? "opacity-70" : ""}`}
+                className={`min-w-0 flex-1 ${isHost ? "cursor-pointer" : "cursor-default"}`}
               >
                 <p className="font-bold text-xs truncate">{idx + 1}. {track.title}</p>
                 <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>{track.artist}</p>
