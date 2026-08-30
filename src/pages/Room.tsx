@@ -96,6 +96,19 @@ const Room = () => {
     }
   }, [isMuted]);
 
+  // Sync audio element with queue state
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // Update audio source when current track changes
+    const newTrack = queueRef.current[currentIndexRef.current];
+    if (newTrack && audio.src !== newTrack.url) {
+      audio.src = newTrack.url;
+      audio.load();
+    }
+  }, [queue]);
+
   // Sync audio time for syncing
   useEffect(() => {
     const audio = audioRef.current;
@@ -326,10 +339,17 @@ const Room = () => {
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex + 1) % queue.length;
     
-    setCurrentIndex(nextIdx);
     const audio = audioRef.current;
-    if (audio) {
+    const nextTrack = queue[nextIdx];
+    
+    if (audio && nextTrack) {
+      // Update source directly before playing
+      audio.src = nextTrack.url;
       audio.currentTime = 0;
+      audio.load();
+      
+      setCurrentIndex(nextIdx);
+      
       audio.play().then(() => {
         setIsPlaying(true);
         broadcast({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
@@ -343,10 +363,17 @@ const Room = () => {
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex - 1 + queue.length) % queue.length;
     
-    setCurrentIndex(prevIdx);
     const audio = audioRef.current;
-    if (audio) {
+    const prevTrack = queue[prevIdx];
+    
+    if (audio && prevTrack) {
+      // Update source directly before playing
+      audio.src = prevTrack.url;
       audio.currentTime = 0;
+      audio.load();
+      
+      setCurrentIndex(prevIdx);
+      
       audio.play().then(() => {
         setIsPlaying(true);
         broadcast({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
@@ -366,10 +393,18 @@ const Room = () => {
 
   const handleTrackClick = (idx: number) => {
     if (!isHost) return;
-    setCurrentIndex(idx);
+    
     const audio = audioRef.current;
-    if (audio) {
+    const track = queue[idx];
+    
+    if (audio && track) {
+      // Update source directly before playing
+      audio.src = track.url;
       audio.currentTime = 0;
+      audio.load();
+      
+      setCurrentIndex(idx);
+      
       audio.play().then(() => {
         setIsPlaying(true);
         broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
