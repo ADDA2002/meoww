@@ -105,7 +105,7 @@ const Room = () => {
         setCurrentIndex(nextIdx);
         const nextTrack = queueRef.current[nextIdx];
         if (nextTrack && syncedClock.isReady()) {
-          const targetTime = syncedClock.now() + 2000;
+          const targetTime = syncedClock.now() + 5000;
           syncScheduler.scheduleTrack(nextTrack, targetTime, `track-${nextIdx}`);
           syncScheduler.startCountdown();
         }
@@ -369,7 +369,7 @@ const Room = () => {
    * Host schedules a track with a synced target time.
    * This is the main entry point for the host to start a track.
    */
-  const scheduleTrackForPlayback = useCallback((trackIdx: number, delayMs: number = 2000) => {
+  const scheduleTrackForPlayback = useCallback((trackIdx: number, delayMs: number = 5000) => {
     if (!isHost) return;
     if (!syncedClock.isReady()) {
       toast.error("Clock not calibrated yet. Please wait...");
@@ -416,7 +416,7 @@ const Room = () => {
       });
     } else {
       // Not playing -> schedule current track
-      scheduleTrackForPlayback(currentIndexRef.current, 2000);
+      scheduleTrackForPlayback(currentIndexRef.current, 5000);
     }
   }, [isHost, scheduleTrackForPlayback]);
 
@@ -431,8 +431,8 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
-    // Schedule next track with synced clock (2s buffer for pre-fetch)
-    scheduleTrackForPlayback(nextIdx, 2000);
+    // Schedule next track with synced clock (5s buffer for pre-fetch)
+    scheduleTrackForPlayback(nextIdx, 5000);
   }, [isHost, isShuffle, scheduleTrackForPlayback]);
 
   const handlePrevious = useCallback(() => {
@@ -446,7 +446,7 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
-    scheduleTrackForPlayback(prevIdx, 2000);
+    scheduleTrackForPlayback(prevIdx, 5000);
   }, [isHost, isShuffle, scheduleTrackForPlayback]);
 
   const handleTrackClick = useCallback((idx: number) => {
@@ -454,7 +454,7 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-    scheduleTrackForPlayback(idx, 2000);
+    scheduleTrackForPlayback(idx, 5000);
   }, [isHost, scheduleTrackForPlayback]);
 
   const handleSeekFromBar = useCallback((time: number) => {
