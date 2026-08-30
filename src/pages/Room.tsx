@@ -129,7 +129,6 @@ const Room = () => {
     currentIndex,
     isPlaying,
     onMessage: handleIncomingMessage,
-    onUsersChange: setUsers,
   });
 
   // Initialize connection
@@ -141,13 +140,18 @@ const Room = () => {
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
     setMyId(generatedId);
+  }, [roomCode]);
+
+  // Load initial users once connected
+  useEffect(() => {
+    if (!isConnected || !myId) return;
 
     getUsers().then((userList) => {
       if (userList.length > 0) {
         setUsers(userList);
       }
     });
-  }, [roomCode]);
+  }, [isConnected, myId]);
 
   // Playback controls
   const handleTogglePlay = useCallback(() => {

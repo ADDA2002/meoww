@@ -11,7 +11,6 @@ interface UseFirebaseSyncOptions {
   currentIndex: number;
   isPlaying: boolean;
   onMessage: (msg: SyncMessage) => void;
-  onUsersChange: (users: RoomUser[]) => void;
 }
 
 export function useFirebaseSync({
@@ -23,7 +22,6 @@ export function useFirebaseSync({
   currentIndex,
   isPlaying,
   onMessage,
-  onUsersChange,
 }: UseFirebaseSyncOptions) {
   const signalingRef = useRef<FirebaseSignaling | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -36,14 +34,13 @@ export function useFirebaseSync({
   isPlayingRef.current = isPlaying;
 
   useEffect(() => {
-    if (!roomCode) return;
+    if (!roomCode || !myId) return;
 
     const signaling = new FirebaseSignaling(roomCode, myId, userName, isHost);
     signalingRef.current = signaling;
 
     signaling.onMessage(onMessage);
     signaling.onConnectionChange(setIsConnected);
-    signaling.onUsersChange(onUsersChange);
 
     signaling.connect();
 
