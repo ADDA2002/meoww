@@ -1,12 +1,13 @@
 import { db, ref, get } from "./firebase";
 
 /**
- * Check if a room exists in Firebase by looking up the room state
+ * Check if a room exists in Firebase by looking up the room state.
+ * On any error, returns true (allow through) to avoid blocking users
+ * with false negatives from network/permission issues.
  */
 export const checkFirebaseRoomExists = async (code: string): Promise<boolean> => {
   if (!db) {
-    console.warn("Firebase not available, allowing through");
-    return true; // Allow through if Firebase isn't available (offline mode)
+    return true; // Allow through if Firebase isn't initialized
   }
 
   try {
@@ -14,7 +15,7 @@ export const checkFirebaseRoomExists = async (code: string): Promise<boolean> =>
     const snapshot = await get(roomRef);
     return snapshot.exists();
   } catch (err) {
-    console.error("Room check error:", err);
-    return false;
+    console.warn("Room check skipped (Firebase error):", err);
+    return true; // Allow through on any Firebase error
   }
 };

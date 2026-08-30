@@ -152,8 +152,9 @@ const Index = () => {
       const formattedName = formatDisplayName(joinName);
       navigate(`/room/${cleanCode}?name=${encodeURIComponent(formattedName)}&host=false`);
     } catch (err) {
-      setJoinError("Couldn't verify the room. Check your connection and try again.");
-      setIsCheckingRoom(false);
+      // On any error, just navigate through (silent fallback)
+      const formattedName = formatDisplayName(joinName);
+      navigate(`/room/${cleanCode}?name=${encodeURIComponent(formattedName)}&host=false`);
     }
   };
 
