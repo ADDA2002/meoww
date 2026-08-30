@@ -31,11 +31,14 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
   const usersRef = useRef<RoomUser[]>([]);
   const queueRef = useRef<Track[]>([]);
   const currentIndexRef = useRef<number>(0);
+  const isHostRef = useRef<boolean>(initialIsHost);
+  const initialNameRef = useRef<string>(initialName);
 
   // Keep refs in sync
   useEffect(() => { usersRef.current = users; }, [users]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { isHostRef.current = isHost; }, [isHost]);
 
   const broadcast = useCallback((msg: SyncMessage) => {
     connectionsRef.current.forEach((conn) => {
@@ -52,11 +55,12 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
     }
   }, []);
 
-  // Add user locally and broadcast update
+  // Add user locally and broadcast update to all peers
   const addUser = useCallback((user: RoomUser) => {
     setUsers((prev) => {
       if (prev.find((u) => u.id === user.id)) return prev;
       const updated = [...prev, user];
+      usersRef.current = updated;
       // Broadcast to all existing connections
       broadcast({ type: "USER_LIST", users: updated });
       return updated;
@@ -67,6 +71,7 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
   const removeUser = useCallback((userId: string) => {
     setUsers((prev) => {
       const updated = prev.filter((u) => u.id !== userId);
+      usersRef.current = updated;
       broadcast({ type: "USER_LIST", users: updated });
       return updated;
     });
@@ -97,23 +102,27 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
 
     const me: RoomUser = {
       id: peerId,
-      name: initialName,
+      name: initialNameRef.current,
       isHost: initialIsHost,
       joinedAt: Date.now(),
     };
 
-    const peer = new Peer(peerId, { debug: 0 });
+    const peer = new Peer(peerId, { debug: 1 });
     peerRef.current = peer;
 
     peer.on("open", () => {
+      console.log("Peer opened:", peerId);
       setIsConnected(true);
 
-      if (initialIsHost) {
-        // I'm the host - add myself to users list
-        addUser(me);
-      } else {
+      // Add myself to the users list
+      setUsers([me]);
+      usersRef.current = [me];
+
+      if (!initialIsHost) {
         // I'm a listener - connect to host
         const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
+        console.log("Connecting to host:", hostPeerId);
+        
         const conn = peer.connect(hostPeerId, { reliable: true });
 
         const timeout = setTimeout(() => {
@@ -121,6 +130,7 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
         }, 5000);
 
         conn.on("open", () => {
+          console.log("Connected to host!");
           clearTimeout(timeout);
           connectionsRef.current.set(hostPeerId, conn);
           // Send JOIN message to host
@@ -128,17 +138,19 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
         });
 
         conn.on("data", (data: any) => {
+          console.log("Received from host:", data.type);
           handleIncomingMessage(data as SyncMessage);
         });
 
         conn.on("close", () => {
+          console.log("Disconnected from host");
           connectionsRef.current.delete(hostPeerId);
           options.onPeerDisconnect?.(hostPeerId);
         });
 
         conn.on("error", (err: any) => {
           clearTimeout(timeout);
-          console.warn("Connection error:", err);
+          console.error("Connection error:", err);
           toast.error("Connection lost to host.");
         });
       }
@@ -146,21 +158,26 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
 
     // Host handles incoming connections
     peer.on("connection", (conn) => {
+      console.log("Host: incoming connection from", conn.peer);
       const timeout = setTimeout(() => {
+        console.log("Connection timed out:", conn.peer);
         conn.close();
       }, 10000);
 
       conn.on("open", () => {
+        console.log("Host: connection opened with", conn.peer);
         clearTimeout(timeout);
         connectionsRef.current.set(conn.peer, conn);
       });
 
       conn.on("data", (data: any) => {
         clearTimeout(timeout);
+        console.log("Host received:", data.type, "from", conn.peer);
         handleIncomingMessage(data as SyncMessage, conn);
       });
 
       conn.on("close", () => {
+        console.log("Host: connection closed", conn.peer);
         connectionsRef.current.delete(conn.peer);
         const disconnectedUser = usersRef.current.find((u) => u.id === conn.peer);
         if (disconnectedUser) {
@@ -171,7 +188,7 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
     });
 
     peer.on("error", (err: any) => {
-      console.warn("PeerJS error:", err);
+      console.error("PeerJS error:", err);
       if (err.type === "unavailable-id" && initialIsHost) {
         toast.error("Room already exists. Try joining instead.");
       } else if (err.type !== "browser-bad-https") {
@@ -191,6 +208,8 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
             const newUser = msg.user;
             addUser(newUser);
             
+            console.log("Host: added user", newUser.name, "total users:", usersRef.current.length);
+            
             // Send current state to the new user
             conn.send({
               type: "USER_LIST",
@@ -209,7 +228,9 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
         }
         case "USER_LIST":
           if (!initialIsHost) {
+            console.log("Listener: received user list with", msg.users.length, "users");
             setUsers(msg.users);
+            usersRef.current = msg.users;
             options.onUserListUpdate?.(msg.users);
           }
           break;
@@ -235,7 +256,7 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
           break;
       }
     }
-  }, [roomCode, initialName, initialIsHost]);
+  }, [roomCode]);
 
   return {
     myId,
