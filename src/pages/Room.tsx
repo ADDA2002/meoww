@@ -182,6 +182,7 @@ const Room = () => {
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
+  // Toggle play/pause
   const handleTogglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !audio.src) return;
@@ -195,6 +196,7 @@ const Room = () => {
     }
   }, []);
 
+  // Next track
   const handleNext = useCallback(() => {
     if (queueRef.current.length === 0) return;
     
@@ -205,6 +207,7 @@ const Room = () => {
     handlePlayTrack(nextIdx);
   }, [handlePlayTrack]);
 
+  // Previous track
   const handlePrevious = useCallback(() => {
     if (queueRef.current.length === 0) return;
     
@@ -215,10 +218,7 @@ const Room = () => {
     handlePlayTrack(prevIdx);
   }, [handlePlayTrack]);
 
-  const handleTrackClick = useCallback((idx: number) => {
-    handlePlayTrack(idx);
-  }, [handlePlayTrack]);
-
+  // Seek the audio
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (audioRef.current) {
       audioRef.current.currentTime = parseFloat(e.target.value);
@@ -226,12 +226,19 @@ const Room = () => {
     }
   }, []);
 
+  // Toggle mute
   const handleToggleMute = useCallback(() => {
     const next = !isMuted;
     setIsMuted(next);
     if (audioRef.current) audioRef.current.muted = next;
   }, [isMuted]);
 
+  // Toggle shuffle
+  const handleToggleShuffle = useCallback(() => {
+    setIsShuffle(!isShuffleRef.current);
+  }, []);
+
+  // Add song to queue
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
       id: `track-${Date.now()}`,
@@ -250,6 +257,7 @@ const Room = () => {
     });
   }, [userName]);
 
+  // Upload local file to queue
   const handleLocalFileUpload = useCallback((file: File) => {
     const fileUrl = URL.createObjectURL(file);
     const newTrack: Track = {
@@ -270,6 +278,7 @@ const Room = () => {
     });
   }, [userName]);
 
+  // Reorder queue (host only)
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
     if (direction === "up" && idx === 0) return;
     if (direction === "down" && idx === queueRef.current.length - 1) return;
@@ -291,6 +300,7 @@ const Room = () => {
     });
   }, []);
 
+  // Remove track from queue (host only)
   const handleRemoveTrack = useCallback((idx: number) => {
     if (queueRef.current.length <= 1) return;
     const newQueue = queueRef.current.filter((_, i) => i !== idx);
@@ -332,7 +342,7 @@ const Room = () => {
             currentIndex={currentIndex}
             isHost={isHost}
             onLeave={handleLeaveRoom}
-            onTrackClick={handleTrackClick}
+            onTrackClick={handlePlayTrack}
             onReorder={handleReorder}
             onRemove={handleRemoveTrack}
             onAddSong={handleAddSong}
@@ -343,7 +353,7 @@ const Room = () => {
 
       <main className="flex-1 p-4 max-w-lg mx-auto w-full">
         {isHost ? (
-          // HOST VIEW: Full controls
+          // HOST VIEW: Full sound controls
           <>
             <div className="w-full aspect-square bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
               {currentTrack?.cover ? (
@@ -381,7 +391,7 @@ const Room = () => {
               <Button
                 variant={isShuffle ? "default" : "ghost"}
                 size="icon"
-                onClick={() => setIsShuffle(!isShuffle)}
+                onClick={handleToggleShuffle}
                 className={`border border-black transition-colors ${
                   isShuffle 
                     ? "bg-black text-white hover:bg-neutral-800" 
