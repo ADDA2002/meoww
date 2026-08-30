@@ -5,14 +5,11 @@ export interface FirebaseSyncState {
   roomCode: string;
   hostId: string;
   currentTrackIndex: number;
-  // NTP-style clock sync: track started at this SERVER time (adjusted via clockOffset)
-  startEpoch: number | null; // Server timestamp (ms) when track should have started
-  // Pre-calculated: ms elapsed since track start (server perspective)
-  serverElapsedMs: number | null;
-  trackDuration: number | null; // Duration of current track in ms
+  isPlaying: boolean;
+  currentTime: number;
   queue: Track[];
   vetoActive?: boolean;
-  lastUpdateId: string;
+  lastUpdateId: string; // Unique ID for each state update to prevent loops
   lastUpdated: number;
 }
 
@@ -28,16 +25,11 @@ class FirebaseSignaling {
   private userRef: any = null;
   private stateRef: any = null;
   private roomRef: any = null;
-  private serverTimeRef: any = null;
   private connected: boolean = false;
   private isDestroyed: boolean = false;
   
   // Track the last update ID we've processed to prevent loops
   private lastProcessedUpdateId: string = "";
-  
-  // Clock offset between local clock and server clock (ms)
-  // serverTime = localTime + clockOffset
-  private clockOffset: number = 0;
   
   // Store unsubscribe functions for cleanup
   private unsubscribers: (() => void)[] = [];
@@ -66,7 +58,6 @@ class FirebaseSignaling {
         this.roomRef = ref(db, `rooms/${this.roomCode}`);
         this.userRef = ref(db, `rooms/${this.roomCode}/users/${this.myId}`);
         this.stateRef = ref(db, `rooms/${this.roomCode}/state`);
-        this.serverTimeRef = ref(db, `.info/serverTimeOffset`);
 
         const userData = {
           id: this.myId,
@@ -90,7 +81,6 @@ class FirebaseSignaling {
           this.notifyConnectionState(true);
 
           this.setupListeners();
-          this.setupClockSync();
 
           if (this.isHost) {
             console.log(`[FirebaseSignaling] I am host, initializing room state`);
@@ -98,9 +88,8 @@ class FirebaseSignaling {
               roomCode: this.roomCode,
               hostId: this.myId,
               currentTrackIndex: 0,
-              startEpoch: null,
-              serverElapsedMs: null,
-              trackDuration: null,
+              isPlaying: false,
+              currentTime: 0,
               queue: [],
               vetoActive: true,
               lastUpdateId: `init-${Date.now()}`,
@@ -125,39 +114,6 @@ class FirebaseSignaling {
         resolve();
       }
     });
-  }
-
-  /**
-   * NTP-style clock sync: Firebase exposes serverTimeOffset via .info/serverTimeOffset
-   * This is the difference (ms) between local clock and server clock.
-   * serverTime = localTime + serverTimeOffset
-   */
-  private setupClockSync() {
-    if (!db || !this.serverTimeRef) return;
-    
-    const timeOffsetUnsub = onValue(this.serverTimeRef, (snapshot: any) => {
-      const offset = snapshot.val() || 0;
-      this.clockOffset = offset;
-      console.log(`[FirebaseSignaling] ⏰ Server time offset: ${offset}ms (serverTime = localTime + ${offset}ms)`);
-    }, (error: any) => {
-      console.error(`[FirebaseSignaling] ❌ onValue timeOffset error:`, error);
-    });
-    this.unsubscribers.push(() => timeOffsetUnsub());
-  }
-
-  /**
-   * Get current server time in milliseconds.
-   * Uses clock offset to convert local time to server time.
-   */
-  getServerTime(): number {
-    return Date.now() + this.clockOffset;
-  }
-
-  /**
-   * Get the current clock offset (ms between local and server)
-   */
-  getClockOffset(): number {
-    return this.clockOffset;
   }
 
   private setupListeners() {
@@ -203,7 +159,7 @@ class FirebaseSignaling {
           return;
         }
         this.lastProcessedUpdateId = state.lastUpdateId || "";
-        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "trackIdx:", state.currentTrackIndex, "startEpoch:", state.startEpoch, "elapsed:", state.serverElapsedMs);
+        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex);
         this.notifyStateChange(state);
       }
     }, (error: any) => {
@@ -279,7 +235,6 @@ class FirebaseSignaling {
   }
 
   // Update room state (PRIMARY sync mechanism for playback)
-  // Uses elapsed-time sync with startEpoch as the anchor
   updateState(updates: Partial<FirebaseSyncState>) {
     if (!db || !this.stateRef) return;
 

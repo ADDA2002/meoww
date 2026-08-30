@@ -83,14 +83,6 @@ export function useFirebaseSync({
     return signalingRef.current?.getState() || null;
   }, []);
 
-  const getServerTime = useCallback((): number => {
-    return signalingRef.current?.getServerTime() || Date.now();
-  }, []);
-
-  const getClockOffset = useCallback((): number => {
-    return signalingRef.current?.getClockOffset() || 0;
-  }, []);
-
   return {
     isConnected,
     broadcast,
@@ -99,7 +91,5 @@ export function useFirebaseSync({
     banUser,
     getUsers,
     getState,
-    getServerTime,
-    getClockOffset,
   };
 }
