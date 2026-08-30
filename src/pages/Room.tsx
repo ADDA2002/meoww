@@ -96,6 +96,14 @@ const Room = () => {
     }
   }, [isMuted]);
 
+  // ALWAYS reset to 0:00 when track changes
+  useEffect(() => {
+    setCurrentTime(0);
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+    }
+  }, [currentIndex]);
+
   // Sync audio time for syncing
   useEffect(() => {
     const audio = audioRef.current;
@@ -298,35 +306,15 @@ const Room = () => {
     }
   };
 
-  // Playback controls
-  const handleTogglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-      broadcast({ type: "PAUSE", seekTime: audio.currentTime });
-    } else {
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({
-          type: "PLAY",
-          trackIndex: currentIndex,
-          seekTime: audio.currentTime,
-          timestamp: Date.now(),
-        });
-      }).catch(() => {});
-    }
-  };
-
-  const handleNext = () => {
+  // Auto-play next track when current ends
+  const handleTrackEnd = () => {
     if (queue.length === 0) return;
     const nextIdx = isShuffle
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex + 1) % queue.length;
     
     setCurrentIndex(nextIdx);
+    setCurrentTime(0);
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
@@ -337,6 +325,34 @@ const Room = () => {
     }
   };
 
+  // Playback controls
+  const handleTogglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+      broadcast({ type: "PAUSE", seekTime: audio.currentTime });
+    } else {
+      audio.currentTime = 0; // Always start from 0
+      setCurrentTime(0);
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: currentIndex,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(() => {});
+    }
+  };
+
+  const handleNext = () => {
+    handleTrackEnd();
+  };
+
   const handlePrevious = () => {
     if (queue.length === 0) return;
     const prevIdx = isShuffle
@@ -344,6 +360,7 @@ const Room = () => {
       : (currentIndex - 1 + queue.length) % queue.length;
     
     setCurrentIndex(prevIdx);
+    setCurrentTime(0);
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
@@ -367,6 +384,7 @@ const Room = () => {
   const handleTrackClick = (idx: number) => {
     if (!isHost) return;
     setCurrentIndex(idx);
+    setCurrentTime(0);
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
@@ -727,7 +745,7 @@ const Room = () => {
         src={currentTrack?.url}
         onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)}
         onLoadedMetadata={() => audioRef.current && setDuration(audioRef.current.duration)}
-        onEnded={handleNext}
+        onEnded={handleTrackEnd}
       />
 
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
