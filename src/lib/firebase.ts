@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, get, Database } from "firebase/database";
 
-// Firebase config - your real credentials
+// Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyC-a_AcGt2LJ3A6O0gyKBI6wg_FfJRyP30",
   authDomain: "meoww-audio.firebaseapp.com",

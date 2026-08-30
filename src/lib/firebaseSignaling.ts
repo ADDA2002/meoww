@@ -1,4 +1,4 @@
-import { db, ref, onValue, set, push, remove, onDisconnect, serverTimestamp } from "./firebase";
+import { db, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, get } from "./firebase";
 import { Track, RoomUser, SyncMessage } from "@/types/music";
 
 export interface FirebaseSyncState {
@@ -41,76 +41,92 @@ class FirebaseSignaling {
   }
 
   connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
+      // Firebase not available - run in offline mode
       if (!db) {
-        // Fallback mode - just resolve without real connection
-        console.warn("Firebase not available, running in offline mode");
+        console.warn("⚠️ Firebase not available, running in offline mode");
         this.connected = true;
         this.notifyConnectionState(true);
         resolve();
         return;
       }
 
-      this.roomRef = ref(db, `rooms/${this.roomCode}`);
-      this.userRef = ref(db, `rooms/${this.roomCode}/users/${this.myId}`);
-      this.stateRef = ref(db, `rooms/${this.roomCode}/state`);
+      try {
+        this.roomRef = ref(db, `rooms/${this.roomCode}`);
+        this.userRef = ref(db, `rooms/${this.roomCode}/users/${this.myId}`);
+        this.stateRef = ref(db, `rooms/${this.roomCode}/state`);
 
-      // Set up my user presence
-      const userData = {
-        id: this.myId,
-        name: this.myName,
-        isHost: this.isHost,
-        joinedAt: Date.now(),
-        lastSeen: serverTimestamp()
-      };
+        // Set up my user presence
+        const userData = {
+          id: this.myId,
+          name: this.myName,
+          isHost: this.isHost,
+          joinedAt: Date.now(),
+          lastSeen: serverTimestamp()
+        };
 
-      set(this.userRef, userData).then(() => {
-        // Auto-remove on disconnect
-        onDisconnect(this.userRef).remove();
-        
+        set(this.userRef, userData).then(() => {
+          // Auto-remove on disconnect
+          onDisconnect(this.userRef).remove();
+          
+          this.connected = true;
+          this.notifyConnectionState(true);
+          
+          console.log("✅ Firebase signaling connected");
+          
+          // If I'm the host, initialize state if it doesn't exist
+          if (this.isHost) {
+            this.initializeRoomState();
+          }
+          
+          // Subscribe to room state changes
+          onValue(this.stateRef, (snapshot: any) => {
+            const state = snapshot.val();
+            if (state) {
+              this.notifyStateChange(state);
+            }
+          });
+
+          // Subscribe to user list changes
+          onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
+            const usersData = snapshot.val();
+            if (usersData) {
+              const users: RoomUser[] = Object.values(usersData);
+              this.notifyMessage({ type: "USER_LIST", users });
+            }
+          });
+
+          // Check if room exists and get host info
+          onValue(this.roomRef, (snapshot: any) => {
+            const roomData = snapshot.val();
+            if (roomData && roomData.state) {
+              this.notifyStateChange(roomData.state);
+            }
+          }, (error: any) => {
+            console.warn("Room state read error:", error);
+          });
+
+          resolve();
+        }).catch((err) => {
+          console.error("❌ Firebase write failed:", err);
+          // Still allow offline mode
+          this.connected = true;
+          this.notifyConnectionState(true);
+          resolve();
+        });
+
+        // Handle disconnection
+        this.roomRef?.onDisconnect?.(() => {
+          this.connected = false;
+          this.notifyConnectionState(false);
+        });
+      } catch (err) {
+        console.error("❌ Firebase setup error:", err);
+        // Still allow offline mode
         this.connected = true;
         this.notifyConnectionState(true);
-        
-        // If I'm the host, initialize state if it doesn't exist
-        if (this.isHost) {
-          this.initializeRoomState();
-        }
-        
-        // Subscribe to room state changes
-        onValue(this.stateRef, (snapshot: any) => {
-          const state = snapshot.val();
-          if (state) {
-            this.notifyStateChange(state);
-          }
-        });
-
-        // Subscribe to user list changes
-        onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
-          const usersData = snapshot.val();
-          if (usersData) {
-            const users: RoomUser[] = Object.values(usersData);
-            this.notifyMessage({ type: "USER_LIST", users });
-          }
-        });
-
-        // Check if room exists and get host info
-        onValue(this.roomRef, (snapshot: any) => {
-          const roomData = snapshot.val();
-          if (roomData && roomData.state) {
-            this.notifyStateChange(roomData.state);
-          }
-        }, (error: any) => {
-          console.warn("Room state read error:", error);
-        });
-
         resolve();
-      }).catch(reject);
-
-      // Handle disconnection
-      this.roomRef?.onDisconnect?.(() => {
-        this.connected = false;
-        this.notifyConnectionState(false);
-      });
+      }
     });
   }
 
@@ -132,7 +148,7 @@ class FirebaseSignaling {
 
   // Send a sync message
   send(msg: SyncMessage) {
-    if (!db || !this.roomRef) return;
+    if (!db) return;
 
     const msgRef = push(ref(db, `rooms/${this.roomCode}/messages`), {
       ...msg,
@@ -166,7 +182,8 @@ class FirebaseSignaling {
   onMessage(callback: (msg: SyncMessage) => void) {
     this.listeners.push(callback);
     
-    // Subscribe to messages
+    if (!db) return;
+    
     const messagesRef = ref(db, `rooms/${this.roomCode}/messages`);
     onValue(messagesRef, (snapshot: any) => {
       const messages = snapshot.val();

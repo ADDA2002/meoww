@@ -169,10 +169,9 @@ const Room = () => {
       setIsConnected(connected);
     });
 
-    // Connect
+    // Connect - now always resolves (even if Firebase fails, goes to offline mode)
     signaling.connect().then(() => {
-      setIsConnected(true);
-      setIsFirebaseConnected(true);
+      console.log("🎉 Room connected!");
       
       // Get initial users
       signaling.getUsers().then((userList) => {
@@ -199,11 +198,6 @@ const Room = () => {
         // Initialize queue for host
         setQueue(DEFAULT_TRACKS);
       }
-    }).catch((err) => {
-      console.error("Firebase connection failed:", err);
-      toast.error("Connection failed. Trying offline mode...");
-      // Still allow local-only mode
-      setIsConnected(true);
     });
 
     return () => {
