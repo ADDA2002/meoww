@@ -12,7 +12,6 @@ import {
   ArrowUp, 
   ArrowDown, 
   Trash2, 
-  Radio, 
   Music, 
   Upload, 
   Users,
@@ -34,6 +33,7 @@ import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 import RoomDrawer from "@/components/RoomDrawer";
+import Header from "@/components/Header";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -692,24 +692,7 @@ const Room = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
-      {/* Top Room Navigation Bar */}
-      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
-        <div className="flex items-center gap-2">
-          <img
-            src="/logo.gif"
-            alt="Meoww Logo"
-            className="w-8 h-8 object-contain"
-          />
-          <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <RoomDrawer
-            roomCode={roomCode}
-            userName={userName}
-            onLeave={handleLeaveRoom}
-          />
-        </div>
-      </header>
+      <Header />
 
       {/* Main Room Layout */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">

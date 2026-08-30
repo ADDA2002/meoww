@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronDown, Radio } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import Peer from "peerjs";
 import { formatDisplayName } from "@/lib/nameFormat";
+import Header from "@/components/Header";
 
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -226,21 +227,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
-      {/* Header Bar */}
-      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
-        <div className="flex items-center gap-2">
-          <img
-            src="/logo.gif"
-            alt="Meoww Logo"
-            className="w-8 h-8 object-contain"
-          />
-          <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
-          <Radio className="w-3.5 h-3.5 animate-pulse text-black" />
-          <span>SYNCED</span>
-        </div>
-      </header>
+      <Header />
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
