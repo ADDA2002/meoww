@@ -5,11 +5,15 @@ interface ProgressBarProps {
   duration: number;
   isHost: boolean;
   isConnected: boolean;
+  controlsLocked?: boolean;
   onSeek: (time: number) => void;
 }
 
-export function ProgressBar({ currentTime, duration, isHost, isConnected, onSeek }: ProgressBarProps) {
+export function ProgressBar({ currentTime, duration, isHost, isConnected, controlsLocked = false, onSeek }: ProgressBarProps) {
+  const canSeek = isConnected && (isHost || !controlsLocked);
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canSeek) return;
     const targetTime = parseFloat(e.target.value);
     onSeek(targetTime);
   };
@@ -22,8 +26,8 @@ export function ProgressBar({ currentTime, duration, isHost, isConnected, onSeek
         max={duration || 100}
         value={currentTime}
         onChange={handleSeek}
-        disabled={!isConnected}
-        className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black disabled:opacity-50"
+        disabled={!canSeek}
+        className="w-full accent-black bg-gray-200 h-1.5 appearance-none border border-black disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
       />
       <div className="flex justify-between text-xs font-mono text-gray-500">
         <span>{formatTime(currentTime)}</span>

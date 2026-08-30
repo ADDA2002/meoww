@@ -14,6 +14,7 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { QueueList } from "@/components/QueueList";
 import { UserList } from "@/components/UserList";
 import { ConnectionStatus, OfflineBanner } from "@/components/ConnectionStatus";
+import { VetoControl } from "@/components/VetoControl";
 
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
@@ -38,6 +39,9 @@ const Room = () => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
 
+  // Veto (host's "Let others change what's playing" toggle)
+  const [vetoActive, setVetoActive] = useState<boolean>(false);
+
   // Session state
   const [sessionEnded, setSessionEnded] = useState<boolean>(false);
 
@@ -47,12 +51,17 @@ const Room = () => {
   const isShuffleRef = useRef(isShuffle);
   const isInitialMount = useRef(true);
   const isReorderingRef = useRef(false);
+  const vetoActiveRef = useRef(vetoActive);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
   isShuffleRef.current = isShuffle;
+  vetoActiveRef.current = vetoActive;
 
   const currentTrack = queue[currentIndex] || null;
+
+  // Convenience: non-host members are "locked" when veto is on
+  const controlsLocked = !isHost && vetoActive;
 
   // Handle track end - advance to next track
   const handleTrackEnded = useCallback(() => {
@@ -147,12 +156,32 @@ const Room = () => {
         setUsers((prev) => prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId })));
         break;
       }
+      case "VETO_TOGGLE": {
+        setVetoActive(msg.active);
+        if (msg.active) {
+          if (msg.hostId === myId) {
+            toast.success("Member controls locked. You're in solo mode.");
+          } else {
+            toast("Host restricted controls. You can add songs only.", {
+              icon: "🔒",
+            });
+          }
+        } else {
+          if (msg.hostId === myId) {
+            toast.success("Member controls restored.");
+          } else {
+            toast("Host restored member controls.", {
+              icon: "🔓",
+            });
+          }
+        }
+        break;
+      }
     }
   }, [myId, play, pause, seek]);
 
   // Handle session ended
   const handleSessionEnded = useCallback(() => {
-    console.log("Session ended - host left");
     setSessionEnded(true);
   }, []);
 
@@ -202,7 +231,18 @@ const Room = () => {
   seekRef.current = seek;
   broadcastRef.current = broadcast;
 
+  // Guard: prevent locked members from triggering sync actions
+  const requireControlAccess = useCallback((): boolean => {
+    if (controlsLocked) {
+      toast.error("Host has restricted member controls. You can only add songs.");
+      return false;
+    }
+    return true;
+  }, [controlsLocked]);
+
   const handleTogglePlay = useCallback(() => {
+    if (!requireControlAccess()) return;
+
     if (isPlaying) {
       pauseRef.current();
       broadcastRef.current({ type: "PAUSE", seekTime: getCurrentTime() });
@@ -215,9 +255,10 @@ const Room = () => {
         timestamp: Date.now(),
       });
     }
-  }, [isPlaying, currentIndex, getCurrentTime]);
+  }, [isPlaying, currentIndex, getCurrentTime, requireControlAccess]);
 
   const handleNext = useCallback(() => {
+    if (!requireControlAccess()) return;
     if (queue.length === 0) return;
     
     const nextIdx = isShuffle
@@ -233,9 +274,10 @@ const Room = () => {
       playRef.current();
       broadcastRef.current({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
     }, 50);
-  }, [queue.length, isShuffle, currentIndex]);
+  }, [queue.length, isShuffle, currentIndex, requireControlAccess]);
 
   const handlePrevious = useCallback(() => {
+    if (!requireControlAccess()) return;
     if (queue.length === 0) return;
     
     const prevIdx = isShuffle
@@ -251,9 +293,11 @@ const Room = () => {
       playRef.current();
       broadcastRef.current({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
     }, 50);
-  }, [queue.length, isShuffle, currentIndex]);
+  }, [queue.length, isShuffle, currentIndex, requireControlAccess]);
 
   const handleTrackClick = useCallback((idx: number) => {
+    if (!requireControlAccess()) return;
+
     setCurrentIndex(idx);
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
@@ -263,9 +307,15 @@ const Room = () => {
       playRef.current();
       broadcastRef.current({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
     }, 50);
-  }, []);
+  }, [requireControlAccess]);
 
-  // Queue management
+  const handleSeekFromBar = useCallback((time: number) => {
+    if (!requireControlAccess()) return;
+    seekRef.current(time);
+    broadcastRef.current({ type: "SEEK", seekTime: time, timestamp: Date.now() });
+  }, [requireControlAccess]);
+
+  // Queue management - "Add" stays open to all members even during veto
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
       id: `track-${Date.now()}`,
@@ -298,7 +348,9 @@ const Room = () => {
     toast.success(`Loaded: ${file.name}`);
   }, [queue, currentIndex, userName, broadcast]);
 
+  // Reorder & Remove are locked for non-host members during veto
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
+    if (!requireControlAccess()) return;
     if (direction === "up" && idx === 0) return;
     if (direction === "down" && idx === queue.length - 1) return;
 
@@ -315,9 +367,10 @@ const Room = () => {
     setQueue(newQueue);
     setCurrentIndex(newActive);
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
-  }, [queue, currentIndex, broadcast]);
+  }, [queue, currentIndex, broadcast, requireControlAccess]);
 
   const handleRemoveTrack = useCallback((idx: number) => {
+    if (!requireControlAccess()) return;
     if (queue.length <= 1) {
       toast.error("Queue must have at least one track.");
       return;
@@ -330,7 +383,7 @@ const Room = () => {
     setQueue(newQueue);
     setCurrentIndex(newActive);
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
-  }, [queue, currentIndex, broadcast]);
+  }, [queue, currentIndex, broadcast, requireControlAccess]);
 
   const handleTransferHost = useCallback((targetUserId: string) => {
     if (!isHost) return;
@@ -339,6 +392,15 @@ const Room = () => {
     broadcast({ type: "HOST_TRANSFER", newHostId: targetUserId });
     toast.info("Host transferred.");
   }, [isHost, broadcast]);
+
+  // Host toggles the "Power of Veto"
+  const handleToggleVeto = useCallback(() => {
+    if (!isHost) return;
+    const next = !vetoActiveRef.current;
+    setVetoActive(next);
+    vetoActiveRef.current = next;
+    broadcast({ type: "VETO_TOGGLE", active: next, hostId: myId });
+  }, [isHost, broadcast, myId]);
 
   const handleLeaveRoom = () => {
     navigate("/");
@@ -428,7 +490,8 @@ const Room = () => {
               duration={duration}
               isHost={isHost}
               isConnected={isConnected}
-              onSeek={seek}
+              controlsLocked={controlsLocked}
+              onSeek={handleSeekFromBar}
             />
 
             <PlayerControls
@@ -437,11 +500,19 @@ const Room = () => {
               isMuted={isMuted}
               isHost={isHost}
               isConnected={isConnected}
+              controlsLocked={controlsLocked}
               onTogglePlay={handleTogglePlay}
               onNext={handleNext}
               onPrevious={handlePrevious}
               onToggleShuffle={() => setIsShuffle(!isShuffle)}
               onToggleMute={() => setIsMuted(!isMuted)}
+            />
+
+            {/* Veto control: host sees toggle, members see status banner */}
+            <VetoControl
+              isHost={isHost}
+              vetoActive={vetoActive}
+              onToggleVeto={handleToggleVeto}
             />
           </div>
         </div>
@@ -459,6 +530,7 @@ const Room = () => {
             queue={queue}
             currentIndex={currentIndex}
             isHost={isHost}
+            controlsLocked={controlsLocked}
             onTrackClick={handleTrackClick}
             onReorder={handleReorder}
             onRemove={handleRemoveTrack}

@@ -27,4 +27,5 @@ export type SyncMessage =
   | { type: "UPDATE_QUEUE"; queue: Track[]; activeIndex: number }
   | { type: "REQUEST_SYNC"; requesterId: string }
   | { type: "HOST_TRANSFER"; newHostId: string }
-  | { type: "CHAT"; sender: string; text: string; time: string };
+  | { type: "CHAT"; sender: string; text: string; time: string }
+  | { type: "VETO_TOGGLE"; active: boolean; hostId: string };
