@@ -16,9 +16,10 @@ import {
   Upload, 
   Users,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Wifi,
+  WifiOff
 } from "lucide-react";
-import Peer, { DataConnection } from "peerjs";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 import RoomDrawer from "@/components/RoomDrawer";
+import FirebaseSignaling, { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -44,15 +46,13 @@ const Room = () => {
   const initialName = formatDisplayName(searchParams.get("name") || "Guest");
   const initialIsHost = searchParams.get("host") === "true";
 
-  // Peer & connection states
+  // Connection states
   const [myId, setMyId] = useState<string>("");
   const [userName, setUserName] = useState<string>(initialName);
   const [isHost, setIsHost] = useState<boolean>(initialIsHost);
   const [users, setUsers] = useState<RoomUser[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [ping, setPing] = useState<number>(0);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  const [isFirebaseConnected, setIsFirebaseConnected] = useState<boolean>(false);
 
   // Audio & Queue states
   const [queue, setQueue] = useState<Track[]>(DEFAULT_TRACKS);
@@ -71,21 +71,21 @@ const Room = () => {
 
   // Refs
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const peerRef = useRef<Peer | null>(null);
-  const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
+  const signalingRef = useRef<FirebaseSignaling | null>(null);
   const usersRef = useRef<RoomUser[]>([]);
   const queueRef = useRef<Track[]>(queue);
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
-  const reconnectAttemptsRef = useRef<number>(0);
-  const pingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const initStartedRef = useRef<boolean>(false);
+  const currentTimeRef = useRef<number>(currentTime);
+  const isPlayingRef = useRef<boolean>(isPlaying);
 
-  // Keep refs updated for event callbacks
+  // Keep refs updated
   usersRef.current = users;
   queueRef.current = queue;
   isHostRef.current = isHost;
   currentIndexRef.current = currentIndex;
+  currentTimeRef.current = currentTime;
+  isPlayingRef.current = isPlaying;
 
   const currentTrack = queue[currentIndex] || null;
 
@@ -96,347 +96,171 @@ const Room = () => {
     }
   }, [isMuted]);
 
-  // Cleanup on unmount
+  // Sync audio time for syncing
   useEffect(() => {
-    return () => {
-      if (pingTimeoutRef.current) {
-        clearTimeout(pingTimeoutRef.current);
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const interval = setInterval(() => {
+      if (audio && isHostRef.current && isPlayingRef.current) {
+        setCurrentTime(audio.currentTime);
       }
-      if (peerRef.current && !peerRef.current.destroyed) {
-        peerRef.current.destroy();
-      }
-    };
+    }, 250);
+
+    return () => clearInterval(interval);
   }, []);
 
-  // Broadcast message to all active peer connections
-  const broadcast = (msg: SyncMessage) => {
-    let sent = 0;
-    connectionsRef.current.forEach((conn) => {
-      if (conn.open) {
-        conn.send(msg);
-        sent++;
-      }
-    });
-    return sent;
-  };
-
-  // Generate a unique name by adding a number suffix if there's a conflict
-  const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
-    const normalizedBase = baseName.trim().toLowerCase();
-    const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
-    
-    if (!existingNames.includes(normalizedBase)) {
-      return baseName;
-    }
-    
-    for (let i = 1; i <= 999; i++) {
-      const candidate = baseName + " " + i;
-      if (!existingNames.includes(candidate.toLowerCase())) {
-        return candidate;
-      }
-    }
-    
-    return baseName + " " + Date.now();
-  };
-
-  // Single ping measurement (called once after connection)
-  const measurePingOnce = (peerInstance: Peer) => {
-    if (isHostRef.current) {
-      return;
-    }
-
-    if (pingTimeoutRef.current) {
-      clearTimeout(pingTimeoutRef.current);
-    }
-
-    pingTimeoutRef.current = setTimeout(() => {
-      const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-      const startTime = Date.now();
-      const conn = peerInstance.connect(hostPeerId, { reliable: true });
-
-      const fallback = setTimeout(() => {
-        try { conn.close(); } catch (e) { /* noop */ }
-        setPing(0);
-      }, 3000);
-
-      conn.on("open", () => {
-        clearTimeout(fallback);
-        const rtt = Date.now() - startTime;
-        setPing(rtt);
-        try { conn.close(); } catch (e) { /* noop */ }
-      });
-
-      conn.on("error", () => {
-        clearTimeout(fallback);
-        try { conn.close(); } catch (e) { /* noop */ }
-      });
-    }, 1500);
-  };
-
-  // Initialize PeerJS connection
-  const initializePeer = () => {
-    if (!roomCode || initStartedRef.current) return;
-    initStartedRef.current = true;
-    setIsReconnecting(true);
+  // Initialize Firebase signaling
+  useEffect(() => {
+    if (!roomCode) return;
 
     const generatedId = isHost 
-      ? `meoww-room-${roomCode.toLowerCase()}` 
-      : `meoww-user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
+      ? `host-${roomCode.toLowerCase()}` 
+      : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
     setMyId(generatedId);
 
-    const finalName = isHost ? userName : generateUniqueName(userName, []);
-    if (finalName !== userName) {
-      setUserName(finalName);
-    }
+    const signaling = new FirebaseSignaling(roomCode, generatedId, userName, isHost);
+    signalingRef.current = signaling;
 
-    const currentUser: RoomUser = {
-      id: generatedId,
-      name: finalName,
-      isHost: isHost,
-      joinedAt: Date.now(),
-    };
-
-    setUsers([currentUser]);
-
-    // Destroy existing peer if any
-    if (peerRef.current && !peerRef.current.destroyed) {
-      peerRef.current.destroy();
-    }
-
-    // Use PeerJS with secure wss:// endpoint
-    const peer = new Peer(generatedId, {
-      debug: 0,
-      secure: true,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun.cloudflare.com:3478' },
-        ],
-        sdpSemantics: 'unified',
-      },
-    });
-    peerRef.current = peer;
-
-    peer.on("open", (id) => {
-      setIsConnected(true);
-      setConnectionError(null);
-      setIsReconnecting(false);
-      reconnectAttemptsRef.current = 0;
-      
-      if (!isHost) {
-        const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-        const conn = peer.connect(hostPeerId, { 
-          reliable: true,
-          metadata: { userId: id }
-        });
-        setupConnection(conn, currentUser);
-        measurePingOnce(peer);
-      }
+    // Handle incoming sync messages
+    signaling.onMessage((msg: SyncMessage) => {
+      handleIncomingMessage(msg);
     });
 
-    peer.on("connection", (conn) => {
-      setupConnection(conn, currentUser);
-    });
-
-    peer.on("error", (err: any) => {
-      console.warn("PeerJS error:", err.type, err.message);
-      setIsReconnecting(false);
-      
-      if (err.type === "unavailable-id" && isHost) {
-        setConnectionError("This room is already hosted elsewhere. Try joining as a listener.");
-      } else if (err.type === "peer-unavailable" && !isHost) {
-        if (reconnectAttemptsRef.current < 3) {
-          reconnectAttemptsRef.current++;
-          const delay = 2000 * reconnectAttemptsRef.current;
-          toast.error(`Host not reachable. Retrying in ${delay / 1000}s... (${reconnectAttemptsRef.current}/3)`);
-          
-          setTimeout(() => {
-            if (peerRef.current && !peerRef.current.destroyed) {
-              const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-              const conn = peerRef.current.connect(hostPeerId, { reliable: true });
-              setupConnection(conn, currentUser);
-            }
-          }, delay);
-        } else {
-          setConnectionError(`Could not reach room "${roomCode}". Check the code and your connection.`);
+    // Handle state changes (from host)
+    signaling.onStateChange((state: FirebaseSyncState) => {
+      if (!isHostRef.current) {
+        // Update queue from host
+        if (state.queue && state.queue.length > 0) {
+          setQueue(state.queue);
         }
-      } else if (err.type === "network" || err.type === "server-error" || err.type === "socket-error" || err.type === "browser-error") {
-        setConnectionError("Connection unstable. Check your internet and click Retry.");
-      } else if (err.type === "browser-incompatible") {
-        setConnectionError("Your browser doesn't support WebRTC. Try Chrome or Firefox.");
-      } else if (err.type === "ssl-unavailable") {
-        setConnectionError("SSL error. Check your connection security.");
-      }
-    });
-
-    peer.on("disconnected", () => {
-      setIsConnected(false);
-      if (peerRef.current && !peerRef.current.destroyed) {
-        setTimeout(() => {
-          try { peerRef.current?.reconnect(); } catch (e) { /* noop */ }
-        }, 1000);
-      }
-    });
-  };
-
-  // Manual retry connection
-  const handleRetryConnection = () => {
-    initStartedRef.current = false;
-    reconnectAttemptsRef.current = 0;
-    setConnectionError(null);
-    setIsConnected(false);
-    if (peerRef.current && !peerRef.current.destroyed) {
-      peerRef.current.destroy();
-    }
-    initializePeer();
-  };
-
-  // Connection data handler
-  const setupConnection = (conn: DataConnection, me: RoomUser) => {
-    conn.on("open", () => {
-      if (isHostRef.current) {
-        const uniqueName = generateUniqueName(me.name, usersRef.current);
-        const updatedUser = { ...me, name: uniqueName };
-
-        connectionsRef.current.set(conn.peer, conn);
-
-        conn.send({
-          type: "JOIN",
-          user: updatedUser,
-        });
         
-        if (uniqueName !== me.name) {
-          conn.send({
-            type: "NAME_UPDATE",
-            newName: uniqueName,
-            originalName: me.name,
-          });
+        // Sync playback state
+        if (state.currentTrackIndex !== undefined) {
+          setCurrentIndex(state.currentTrackIndex);
         }
-      } else {
-        connectionsRef.current.set(conn.peer, conn);
-        conn.send({
-          type: "JOIN",
-          user: me,
-        });
-      }
-    });
-
-    conn.on("data", (data: any) => {
-      handleIncomingMessage(data as SyncMessage, conn.peer);
-    });
-
-    conn.on("close", () => {
-      connectionsRef.current.delete(conn.peer);
-      handlePeerDisconnect(conn.peer);
-    });
-
-    conn.on("error", (err: any) => {
-      console.warn("Connection error:", err);
-      connectionsRef.current.delete(conn.peer);
-    });
-  };
-
-  // Handle incoming protocol messages
-  const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
-    switch (msg.type) {
-      case "NAME_UPDATE": {
-        setUserName(msg.newName);
-        toast.info(`Your name was updated to "${msg.newName}" because "${msg.originalName}" was taken.`);
-        break;
-      }
-
-      case "JOIN": {
-        if (isHostRef.current) {
-          const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
-          const updatedUser = { ...msg.user, name: uniqueName };
-
-          const newUser = updatedUser;
-          const updatedUsers = [...usersRef.current.filter(u => u.id !== newUser.id), newUser];
-          setUsers(updatedUsers);
-          
-          if (uniqueName !== msg.user.name) {
-            const conn = connectionsRef.current.get(senderPeerId);
-            if (conn && conn.open) {
-              conn.send({
-                type: "NAME_UPDATE",
-                newName: uniqueName,
-                originalName: msg.user.name,
-              });
-            }
-            toast.info(`${msg.user.name} joined as "${uniqueName}" (name adjusted).`);
+        
+        // Sync play/pause
+        if (state.isPlaying !== undefined && state.isPlaying !== isPlayingRef.current) {
+          if (state.isPlaying) {
+            audioRef.current?.play().catch(() => {});
+            setIsPlaying(true);
           } else {
-            toast.info(`${newUser.name} joined the jam!`);
+            audioRef.current?.pause();
+            setIsPlaying(false);
           }
-
-          broadcast({
-            type: "USER_LIST",
-            users: updatedUsers,
-          });
-          break;
         }
-
-        const newUser = msg.user;
-        const updatedUsers = [...usersRef.current.filter(u => u.id !== newUser.id), newUser];
-        setUsers(updatedUsers);
-        toast.info(`${newUser.name} joined the jam!`);
-
-        if (isHostRef.current) {
-          broadcast({
-            type: "USER_LIST",
-            users: updatedUsers,
-          });
+        
+        // Sync current time (with latency compensation)
+        if (state.currentTime !== undefined && state.timestamp) {
+          const latency = (Date.now() - state.timestamp) / 1000;
+          const targetTime = state.currentTime + latency;
+          if (audioRef.current && Math.abs(audioRef.current.currentTime - targetTime) > 0.5) {
+            audioRef.current.currentTime = targetTime;
+          }
         }
-        break;
       }
+    });
 
+    // Handle connection state
+    signaling.onConnectionChange((connected: boolean) => {
+      setIsFirebaseConnected(connected);
+      setIsConnected(connected);
+    });
+
+    // Connect
+    signaling.connect().then(() => {
+      setIsConnected(true);
+      setIsFirebaseConnected(true);
+      
+      // Get initial users
+      signaling.getUsers().then((userList) => {
+        if (userList.length > 0) {
+          setUsers(userList);
+        }
+      });
+
+      // Get initial state if exists
+      if (!isHost) {
+        signaling.getState().then((state) => {
+          if (state) {
+            if (state.queue && state.queue.length > 0) {
+              setQueue(state.queue);
+            }
+            setCurrentIndex(state.currentTrackIndex || 0);
+            if (state.isPlaying) {
+              audioRef.current?.play().catch(() => {});
+              setIsPlaying(true);
+            }
+          }
+        });
+      } else {
+        // Initialize queue for host
+        setQueue(DEFAULT_TRACKS);
+      }
+    }).catch((err) => {
+      console.error("Firebase connection failed:", err);
+      toast.error("Connection failed. Trying offline mode...");
+      // Still allow local-only mode
+      setIsConnected(true);
+    });
+
+    return () => {
+      signaling.disconnect();
+    };
+  }, [roomCode]);
+
+  // Handle incoming sync messages
+  const handleIncomingMessage = (msg: SyncMessage) => {
+    switch (msg.type) {
       case "USER_LIST": {
         setUsers(msg.users);
         break;
       }
-
       case "PLAY": {
-        const audio = audioRef.current;
-        if (!audio) return;
-
-        const latencySec = (Date.now() - msg.timestamp) / 1000;
-        const targetTime = msg.seekTime + latencySec;
-
-        if (currentIndexRef.current !== msg.trackIndex) {
-          setCurrentIndex(msg.trackIndex);
+        if (!isHostRef.current) {
+          const audio = audioRef.current;
+          if (!audio) return;
+          
+          // Switch track if needed
+          if (currentIndexRef.current !== msg.trackIndex) {
+            setCurrentIndex(msg.trackIndex);
+          }
+          
+          // Sync time
+          const latency = (Date.now() - msg.timestamp) / 1000;
+          const targetTime = msg.seekTime + latency;
+          if (Math.abs(audio.currentTime - targetTime) > 0.3) {
+            audio.currentTime = targetTime;
+          }
+          
+          // Play
+          audio.play().then(() => setIsPlaying(true)).catch(() => {});
         }
-
-        if (Math.abs(audio.currentTime - targetTime) > 0.15) {
-          audio.currentTime = targetTime;
-        }
-
-        audio.play().then(() => setIsPlaying(true)).catch((e) => {
-          console.log("Auto-play blocked:", e);
-        });
         break;
       }
-
       case "PAUSE": {
-        const audio = audioRef.current;
-        if (audio) {
-          audio.currentTime = msg.seekTime;
-          audio.pause();
-          setIsPlaying(false);
+        if (!isHostRef.current) {
+          const audio = audioRef.current;
+          if (audio) {
+            audio.currentTime = msg.seekTime;
+            audio.pause();
+            setIsPlaying(false);
+          }
         }
         break;
       }
-
       case "SEEK": {
-        const audio = audioRef.current;
-        if (audio) {
-          const latencySec = (Date.now() - msg.timestamp) / 1000;
-          audio.currentTime = msg.seekTime + latencySec;
+        if (!isHostRef.current) {
+          const audio = audioRef.current;
+          if (audio) {
+            const latency = (Date.now() - msg.timestamp) / 1000;
+            audio.currentTime = msg.seekTime + latency;
+          }
         }
         break;
       }
-
       case "UPDATE_QUEUE": {
         setQueue(msg.queue);
         if (msg.activeIndex !== undefined) {
@@ -444,42 +268,51 @@ const Room = () => {
         }
         break;
       }
-
       case "HOST_TRANSFER": {
         if (msg.newHostId === myId) {
           setIsHost(true);
-          toast.success("You are now the Host of this Jam!");
+          toast.success("You are now the Host!");
         } else {
           setIsHost(false);
         }
-        setUsers((prev) =>
-          prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId }))
-        );
+        setUsers((prev) => prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId })));
         break;
       }
     }
   };
 
-  const handlePeerDisconnect = (disconnectedId: string) => {
-    const remainingUsers = usersRef.current.filter((u) => u.id !== disconnectedId);
-    setUsers(remainingUsers);
-
-    const wasHost = usersRef.current.find((u) => u.id === disconnectedId)?.isHost;
-    if (wasHost && remainingUsers.length > 0) {
-      const sorted = [...remainingUsers].sort((a, b) => a.joinedAt - b.joinedAt);
-      const nextHost = sorted[0];
-
-      if (nextHost.id === myId) {
-        setIsHost(true);
-        toast.success("Host left. You are now the host!");
-        broadcast({
-          type: "HOST_TRANSFER",
-          newHostId: nextHost.id,
-        });
+  // Broadcast sync message
+  const broadcast = (msg: SyncMessage) => {
+    signalingRef.current?.send(msg);
+    
+    // Also update Firebase state if host
+    if (isHost) {
+      const stateUpdates: Partial<FirebaseSyncState> = {};
+      
+      if (msg.type === "PLAY") {
+        stateUpdates.isPlaying = true;
+        stateUpdates.currentTrackIndex = msg.trackIndex;
+        stateUpdates.currentTime = msg.seekTime;
+        stateUpdates.timestamp = msg.timestamp;
+        stateUpdates.queue = queueRef.current;
+      } else if (msg.type === "PAUSE") {
+        stateUpdates.isPlaying = false;
+        stateUpdates.currentTime = msg.seekTime;
+      } else if (msg.type === "SEEK") {
+        stateUpdates.currentTime = msg.seekTime;
+        stateUpdates.timestamp = msg.timestamp;
+      } else if (msg.type === "UPDATE_QUEUE") {
+        stateUpdates.queue = msg.queue;
+        stateUpdates.currentTrackIndex = msg.activeIndex;
+      }
+      
+      if (Object.keys(stateUpdates).length > 0) {
+        signalingRef.current?.updateState(stateUpdates);
       }
     }
   };
 
+  // Playback controls
   const handleTogglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -487,10 +320,7 @@ const Room = () => {
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
-      broadcast({
-        type: "PAUSE",
-        seekTime: audio.currentTime,
-      });
+      broadcast({ type: "PAUSE", seekTime: audio.currentTime });
     } else {
       audio.play().then(() => {
         setIsPlaying(true);
@@ -500,57 +330,41 @@ const Room = () => {
           seekTime: audio.currentTime,
           timestamp: Date.now(),
         });
-      }).catch(console.error);
+      }).catch(() => {});
     }
   };
 
   const handleNext = () => {
     if (queue.length === 0) return;
-    let nextIdx = 0;
-    if (isShuffle) {
-      nextIdx = Math.floor(Math.random() * queue.length);
-    } else {
-      nextIdx = (currentIndex + 1) % queue.length;
-    }
+    const nextIdx = isShuffle
+      ? Math.floor(Math.random() * queue.length)
+      : (currentIndex + 1) % queue.length;
+    
     setCurrentIndex(nextIdx);
-
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
       audio.play().then(() => {
         setIsPlaying(true);
-        broadcast({
-          type: "PLAY",
-          trackIndex: nextIdx,
-          seekTime: 0,
-          timestamp: Date.now(),
-        });
-      }).catch(console.error);
+        broadcast({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
+      }).catch(() => {});
     }
   };
 
   const handlePrevious = () => {
     if (queue.length === 0) return;
-    let prevIdx = 0;
-    if (isShuffle) {
-      prevIdx = Math.floor(Math.random() * queue.length);
-    } else {
-      prevIdx = (currentIndex - 1 + queue.length) % queue.length;
-    }
+    const prevIdx = isShuffle
+      ? Math.floor(Math.random() * queue.length)
+      : (currentIndex - 1 + queue.length) % queue.length;
+    
     setCurrentIndex(prevIdx);
-
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
       audio.play().then(() => {
         setIsPlaying(true);
-        broadcast({
-          type: "PLAY",
-          trackIndex: prevIdx,
-          seekTime: 0,
-          timestamp: Date.now(),
-        });
-      }).catch(console.error);
+        broadcast({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
+      }).catch(() => {});
     }
   };
 
@@ -560,14 +374,24 @@ const Room = () => {
     if (audio) {
       audio.currentTime = targetTime;
       setCurrentTime(targetTime);
-      broadcast({
-        type: "SEEK",
-        seekTime: targetTime,
-        timestamp: Date.now(),
-      });
+      broadcast({ type: "SEEK", seekTime: targetTime, timestamp: Date.now() });
     }
   };
 
+  const handleTrackClick = (idx: number) => {
+    if (!isHost) return;
+    setCurrentIndex(idx);
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
+      }).catch(() => {});
+    }
+  };
+
+  // Queue management
   const handleAddSong = (e: React.FormEvent) => {
     e.preventDefault();
     if (!songTitle.trim() || !songUrl.trim()) {
@@ -585,17 +409,13 @@ const Room = () => {
 
     const updatedQueue = [...queue, newTrack];
     setQueue(updatedQueue);
-    broadcast({
-      type: "UPDATE_QUEUE",
-      queue: updatedQueue,
-      activeIndex: currentIndex,
-    });
+    broadcast({ type: "UPDATE_QUEUE", queue: updatedQueue, activeIndex: currentIndex });
 
     setSongTitle("");
     setSongArtist("");
     setSongUrl("");
     setAddSongOpen(false);
-    toast.success("Track added to queue!");
+    toast.success("Track added!");
   };
 
   const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -606,7 +426,7 @@ const Room = () => {
     const newTrack: Track = {
       id: `local-${Date.now()}`,
       title: file.name.replace(/\.[^/.]+$/, ""),
-      artist: `${userName} (Local MP3)`,
+      artist: `${userName} (Local)`,
       url: fileUrl,
       addedBy: userName,
       isLocalFile: true,
@@ -614,13 +434,9 @@ const Room = () => {
 
     const updatedQueue = [...queue, newTrack];
     setQueue(updatedQueue);
-    broadcast({
-      type: "UPDATE_QUEUE",
-      queue: updatedQueue,
-      activeIndex: currentIndex,
-    });
+    broadcast({ type: "UPDATE_QUEUE", queue: updatedQueue, activeIndex: currentIndex });
 
-    toast.success(`Loaded local audio: ${file.name}`);
+    toast.success(`Loaded: ${file.name}`);
     setAddSongOpen(false);
   };
 
@@ -630,25 +446,15 @@ const Room = () => {
 
     const targetIdx = direction === "up" ? idx - 1 : idx + 1;
     const newQueue = [...queue];
-    const temp = newQueue[idx];
-    newQueue[idx] = newQueue[targetIdx];
-    newQueue[targetIdx] = temp;
+    [newQueue[idx], newQueue[targetIdx]] = [newQueue[targetIdx], newQueue[idx]];
 
     let newActive = currentIndex;
-    if (currentIndex === idx) {
-      newActive = targetIdx;
-    } else if (currentIndex === targetIdx) {
-      newActive = idx;
-    }
+    if (currentIndex === idx) newActive = targetIdx;
+    else if (currentIndex === targetIdx) newActive = idx;
 
     setQueue(newQueue);
     setCurrentIndex(newActive);
-
-    broadcast({
-      type: "UPDATE_QUEUE",
-      queue: newQueue,
-      activeIndex: newActive,
-    });
+    broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
   };
 
   const handleRemoveTrack = (idx: number) => {
@@ -658,39 +464,29 @@ const Room = () => {
     }
     const newQueue = queue.filter((_, i) => i !== idx);
     let newActive = currentIndex;
-    if (idx < currentIndex) {
-      newActive = currentIndex - 1;
-    } else if (idx === currentIndex) {
-      newActive = Math.min(currentIndex, newQueue.length - 1);
-    }
+    if (idx < currentIndex) newActive = currentIndex - 1;
+    else if (idx === currentIndex) newActive = Math.min(currentIndex, newQueue.length - 1);
+    
     setQueue(newQueue);
     setCurrentIndex(newActive);
-
-    broadcast({
-      type: "UPDATE_QUEUE",
-      queue: newQueue,
-      activeIndex: newActive,
-    });
+    broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
   };
 
   const handleTransferHost = (targetUserId: string) => {
     if (!isHost) return;
     setIsHost(false);
-    setUsers((prev) =>
-      prev.map((u) => ({ ...u, isHost: u.id === targetUserId }))
-    );
-    broadcast({
-      type: "HOST_TRANSFER",
-      newHostId: targetUserId,
-    });
-    toast.info("Host controls transferred.");
+    setUsers((prev) => prev.map((u) => ({ ...u, isHost: u.id === targetUserId })));
+    broadcast({ type: "HOST_TRANSFER", newHostId: targetUserId });
+    toast.info("Host transferred.");
   };
 
   const handleLeaveRoom = () => {
-    if (peerRef.current && !peerRef.current.destroyed) {
-      peerRef.current.destroy();
-    }
+    signalingRef.current?.disconnect();
     navigate("/");
+  };
+
+  const handleRetry = () => {
+    window.location.reload();
   };
 
   const formatTime = (secs: number) => {
@@ -700,78 +496,54 @@ const Room = () => {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  // Initialize on mount
-  useEffect(() => {
-    initializePeer();
-  }, [roomCode]);
-
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
-      {/* Top Room Navigation Bar */}
+      {/* Header */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
         <div className="flex items-center gap-2">
-          <img
-            src="/logo.gif"
-            alt="Meoww Logo"
-            className="w-8 h-8 object-contain"
-          />
+          <img src="/logo.gif" alt="Meoww" className="w-8 h-8 object-contain" />
           <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
         </div>
-        <div className="flex items-center gap-2">
-          <RoomDrawer
-            roomCode={roomCode}
-            userName={userName}
-            onLeave={handleLeaveRoom}
-          />
+        <div className="flex items-center gap-3">
+          {/* Connection status */}
+          <div className={`flex items-center gap-1.5 text-xs font-mono px-2 py-1 ${isConnected ? 'text-green-600' : 'text-red-500'}`}>
+            {isConnected ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+            <span>{isConnected ? 'CONNECTED' : 'OFFLINE'}</span>
+          </div>
+          <RoomDrawer roomCode={roomCode} userName={userName} onLeave={handleLeaveRoom} />
         </div>
       </header>
 
-      {/* Connection Error Banner with Retry Button */}
-      {connectionError && (
+      {/* Offline Banner */}
+      {!isConnected && (
         <div className="bg-amber-50 border-b border-amber-300 px-6 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-sm font-mono text-amber-800">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span className="font-semibold">{connectionError}</span>
+            <span>Connection lost. Trying to reconnect...</span>
           </div>
-          <Button
-            onClick={handleRetryConnection}
-            size="sm"
-            className="bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold px-3 py-1.5 flex-shrink-0"
-          >
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-            RETRY
+          <Button onClick={handleRetry} size="sm" className="bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold px-3 py-1.5">
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />RETRY
           </Button>
         </div>
       )}
 
-      {/* Reconnecting indicator */}
-      {isReconnecting && (
-        <div className="bg-blue-50 border-b border-blue-300 px-6 py-2 text-xs font-mono text-blue-800 flex items-center gap-2">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          <span>Connecting to signaling server...</span>
-        </div>
-      )}
-
-      {/* Main Room Layout */}
+      {/* Main Layout */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Music Player & Host Dashboard */}
+        {/* Player */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Active Player Card */}
-          <div className="border border-black bg-white p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] relative">
-            {/* Latency & Host Status Bar */}
+          <div className="border border-black bg-white p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            {/* Status */}
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 text-xs font-mono">
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 ${isConnected ? "bg-black" : "bg-red-500"} animate-pulse`}></span>
+                <span className={`w-2 h-2 ${isConnected ? 'bg-black' : 'bg-red-500'} animate-pulse`}></span>
                 <span className="font-semibold text-gray-700 uppercase">
-                  {isHost ? "YOU ARE HOST" : "LISTENER MODE (SYNCED)"}
+                  {isHost ? 'YOU ARE HOST' : 'SYNCED WITH HOST'}
                 </span>
               </div>
-              <div className="flex items-center gap-1 text-gray-500">
-                <span>{ping > 0 ? `ping ${ping}ms` : "—"}</span>
-              </div>
+              <span className="text-gray-500">FIREBASE REALTIME</span>
             </div>
 
-            {/* Song Info */}
+            {/* Track Info */}
             <div className="flex gap-4 items-center mb-6">
               <div className="w-20 h-20 sm:w-24 sm:h-24 bg-gray-100 border border-black flex-shrink-0 flex items-center justify-center overflow-hidden">
                 {currentTrack?.cover ? (
@@ -782,10 +554,10 @@ const Room = () => {
               </div>
               <div className="min-w-0 flex-1">
                 <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-black truncate">
-                  {currentTrack ? currentTrack.title : "No Track Selected"}
+                  {currentTrack?.title || "No Track"}
                 </h2>
                 <p className="text-sm font-medium text-gray-600 truncate mt-0.5">
-                  {currentTrack ? currentTrack.artist : "Queue is empty"}
+                  {currentTrack?.artist || "Add songs to queue"}
                 </p>
                 <div className="mt-2 flex items-center gap-2 text-xs font-mono text-gray-500">
                   <span>ADDED BY:</span>
@@ -794,7 +566,7 @@ const Room = () => {
               </div>
             </div>
 
-            {/* Time progress bar */}
+            {/* Progress */}
             <div className="space-y-1.5 mb-6">
               <input
                 type="range"
@@ -802,7 +574,7 @@ const Room = () => {
                 max={duration || 100}
                 value={currentTime}
                 onChange={handleSeek}
-                disabled={!isHost || !isConnected}
+                disabled={!isHost}
                 className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black disabled:opacity-50"
               />
               <div className="flex justify-between text-xs font-mono text-gray-500">
@@ -811,59 +583,26 @@ const Room = () => {
               </div>
             </div>
 
-            {/* Controls Row */}
+            {/* Controls */}
             <div className="flex items-center justify-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsShuffle(!isShuffle)}
-                disabled={!isConnected}
-                className={`p-2 border border-black transition-colors disabled:opacity-50 ${
-                  isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
-                }`}
-                title="Toggle Shuffle"
-              >
+              <button onClick={() => setIsShuffle(!isShuffle)} disabled={!isConnected}
+                className={`p-2 border border-black transition-colors disabled:opacity-50 ${isShuffle ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'}`}>
                 <Shuffle className="w-4 h-4" />
               </button>
-
-              <button
-                type="button"
-                onClick={handlePrevious}
-                disabled={!isConnected}
-                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
-                title="Previous Song"
-              >
+              <button onClick={handlePrevious} disabled={!isConnected}
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50">
                 <SkipBack className="w-5 h-5" />
               </button>
-
-              <button
-                type="button"
-                onClick={handleTogglePlay}
-                disabled={!isConnected}
-                className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors disabled:opacity-50"
-                title={isPlaying ? "Pause" : "Play"}
-              >
+              <button onClick={handleTogglePlay} disabled={!isConnected}
+                className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors disabled:opacity-50">
                 {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
               </button>
-
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={!isConnected}
-                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
-                title="Next Song"
-              >
+              <button onClick={handleNext} disabled={!isConnected}
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50">
                 <SkipForward className="w-5 h-5" />
               </button>
-
-              <button
-                type="button"
-                onClick={() => setIsMuted(!isMuted)}
-                disabled={!isConnected}
-                className={`p-2 border border-black transition-colors disabled:opacity-50 ${
-                  isMuted ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
-                }`}
-                title={isMuted ? "Unmute" : "Mute"}
-              >
+              <button onClick={() => setIsMuted(!isMuted)} disabled={!isConnected}
+                className={`p-2 border border-black transition-colors disabled:opacity-50 ${isMuted ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'}`}>
                 {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
             </div>
@@ -871,36 +610,26 @@ const Room = () => {
             {!isHost && (
               <div className="mt-4 p-2.5 bg-gray-50 border border-gray-200 text-xs text-gray-600 font-mono flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-black flex-shrink-0" />
-                <span>Host controls playback. All can add and organize songs in the queue below.</span>
+                <span>Host controls playback. All can add and organize songs below.</span>
               </div>
             )}
           </div>
-
-          {/* Quick instructions */}
-          <div className="border border-gray-300 p-4 bg-gray-50 text-xs font-mono text-gray-600 space-y-1.5">
-            <p className="font-bold text-black uppercase">Tip for your own music:</p>
-            <p>You can add any MP3 link from GitHub, or upload your local test.mp3 file directly using the "Add Track" button.</p>
-          </div>
         </div>
 
-        {/* Right Column: Shared Queue & Connected Listeners */}
+        {/* Right Column */}
         <div className="lg:col-span-5 space-y-6">
-          {/* Connected Jam Members */}
+          {/* Users */}
           <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
             <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
               <div className="flex items-center gap-2">
                 <Users className="w-4 h-4 text-black" />
                 <span className="font-bold text-xs uppercase tracking-wider">Participants ({users.length})</span>
               </div>
-              <span className="text-xs font-mono text-gray-500">REALTIME</span>
+              <span className="text-xs font-mono text-gray-500">FIREBASE</span>
             </div>
-
             <div className="space-y-2 max-h-36 overflow-y-auto">
               {users.map((user) => (
-                <div
-                  key={user.id}
-                  className="flex items-center justify-between p-2 border border-gray-200 bg-gray-50 text-xs font-mono"
-                >
+                <div key={user.id} className="flex items-center justify-between p-2 border border-gray-200 bg-gray-50 text-xs font-mono">
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-2 h-2 bg-black"></div>
                     <span className="font-semibold text-black truncate">
@@ -909,14 +638,10 @@ const Room = () => {
                   </div>
                   <div className="flex items-center gap-2">
                     {user.isHost ? (
-                      <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
-                        HOST
-                      </span>
+                      <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">HOST</span>
                     ) : isHost ? (
-                      <button
-                        onClick={() => handleTransferHost(user.id)}
-                        className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-neutral-800 transition-colors cursor-pointer"
-                      >
+                      <button onClick={() => handleTransferHost(user.id)}
+                        className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-neutral-800 cursor-pointer">
                         MAKE HOST
                       </button>
                     ) : (
@@ -925,158 +650,81 @@ const Room = () => {
                   </div>
                 </div>
               ))}
+              {users.length === 0 && (
+                <div className="text-xs text-gray-400 font-mono text-center py-4">Waiting for participants...</div>
+              )}
             </div>
           </div>
 
-          {/* Shared Playlist Queue */}
+          {/* Queue */}
           <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
             <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
-              <span className="font-bold text-xs uppercase tracking-wider">Shared Queue ({queue.length})</span>
-              
-              {/* Add Song Modal Trigger */}
+              <span className="font-bold text-xs uppercase tracking-wider">Queue ({queue.length})</span>
               <Dialog open={addSongOpen} onOpenChange={setAddSongOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm" className="bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold px-3 py-1">
-                    <Plus className="w-3.5 h-3.5 mr-1" />
-                    ADD TRACK
+                    <Plus className="w-3.5 h-3.5 mr-1" />ADD
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="border border-black bg-white text-black p-6 rounded-none shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-md">
                   <DialogHeader>
-                    <DialogTitle className="text-lg font-bold tracking-tight uppercase">Add Song to Queue</DialogTitle>
+                    <DialogTitle className="text-lg font-bold tracking-tight uppercase">Add Song</DialogTitle>
                   </DialogHeader>
-
                   <div className="space-y-6 pt-2">
-                    {/* Method 1: Local MP3 file upload */}
                     <div className="p-4 border border-dashed border-black bg-gray-50 text-center space-y-2">
                       <Upload className="w-6 h-6 mx-auto text-black" />
-                      <p className="text-xs font-semibold uppercase">Option 1: Upload your local MP3 file</p>
-                      <p className="text-[11px] text-gray-500">Pick any MP3 from your computer or downloads folder</p>
-                      <label className="inline-block mt-2 cursor-pointer bg-black text-white text-xs font-mono px-4 py-2 hover:bg-neutral-800 transition-colors">
-                        Select MP3 File
-                        <input
-                          type="file"
-                          accept="audio/mp3,audio/*"
-                          onChange={handleLocalFileUpload}
-                          className="hidden"
-                        />
+                      <p className="text-xs font-semibold uppercase">Upload MP3</p>
+                      <label className="inline-block mt-2 cursor-pointer bg-black text-white text-xs font-mono px-4 py-2 hover:bg-neutral-800">
+                        Select MP3
+                        <input type="file" accept="audio/mp3,audio/*" onChange={handleLocalFileUpload} className="hidden" />
                       </label>
                     </div>
-
                     <div className="relative flex py-1 items-center">
                       <div className="flex-grow border-t border-gray-300"></div>
-                      <span className="flex-shrink mx-4 text-gray-400 text-xs font-mono uppercase">Or via URL</span>
+                      <span className="flex-shrink mx-4 text-gray-400 text-xs font-mono uppercase">Or URL</span>
                       <div className="flex-grow border-t border-gray-300"></div>
                     </div>
-
-                    {/* Method 2: Online or GitHub URL */}
                     <form onSubmit={handleAddSong} className="space-y-3">
                       <div className="space-y-1">
-                        <Label className="text-xs font-mono uppercase text-gray-700">Track Title</Label>
-                        <Input
-                          value={songTitle}
-                          onChange={(e) => setSongTitle(e.target.value)}
-                          placeholder="e.g. My Favorite Song"
-                          className="border-gray-300 text-black font-medium"
-                        />
+                        <Label className="text-xs font-mono uppercase text-gray-700">Title</Label>
+                        <Input value={songTitle} onChange={(e) => setSongTitle(e.target.value)} placeholder="Song name" className="border-gray-300" />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs font-mono uppercase text-gray-700">Artist</Label>
-                        <Input
-                          value={songArtist}
-                          onChange={(e) => setSongArtist(e.target.value)}
-                          placeholder="e.g. Artist Name"
-                          className="border-gray-300 text-black font-medium"
-                        />
+                        <Input value={songArtist} onChange={(e) => setSongArtist(e.target.value)} placeholder="Artist name" className="border-gray-300" />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs font-mono uppercase text-gray-700">Audio Stream / GitHub MP3 URL</Label>
-                        <Input
-                          value={songUrl}
-                          onChange={(e) => setSongUrl(e.target.value)}
-                          placeholder="https://raw.githubusercontent.com/.../song.mp3"
-                          className="border-gray-300 text-black font-mono text-xs"
-                        />
+                        <Label className="text-xs font-mono uppercase text-gray-700">Audio URL</Label>
+                        <Input value={songUrl} onChange={(e) => setSongUrl(e.target.value)} placeholder="https://..." className="border-gray-300 font-mono text-xs" />
                       </div>
-                      <Button
-                        type="submit"
-                        className="w-full bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold py-2 mt-2"
-                      >
-                        Add to Queue
-                      </Button>
+                      <Button type="submit" className="w-full bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold py-2">Add to Queue</Button>
                     </form>
                   </div>
                 </DialogContent>
               </Dialog>
             </div>
 
-            {/* Queue List with Priority Reordering */}
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
               {queue.map((track, idx) => {
                 const isCurrent = idx === currentIndex;
                 return (
-                  <div
-                    key={track.id}
-                    className={`p-2.5 border transition-colors flex items-center justify-between gap-2 ${
-                      isCurrent
-                        ? "bg-black text-white border-black"
-                        : "bg-white text-black border-gray-200 hover:border-gray-400"
-                    }`}
-                  >
-                    <div
-                      onClick={() => {
-                        if (isHost && isConnected) {
-                          setCurrentIndex(idx);
-                          broadcast({
-                            type: "PLAY",
-                            trackIndex: idx,
-                            seekTime: 0,
-                            timestamp: Date.now(),
-                          });
-                        }
-                      }}
-                      className="min-w-0 flex-1 cursor-pointer"
-                    >
-                      <p className="font-bold text-xs truncate">
-                        {idx + 1}. {track.title}
-                      </p>
-                      <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>
-                        {track.artist}
-                      </p>
+                  <div key={track.id}
+                    className={`p-2.5 border transition-colors flex items-center justify-between gap-2 ${isCurrent ? 'bg-black text-white border-black' : 'bg-white text-black border-gray-200 hover:border-gray-400'}`}>
+                    <div onClick={() => handleTrackClick(idx)} className="min-w-0 flex-1 cursor-pointer">
+                      <p className="font-bold text-xs truncate">{idx + 1}. {track.title}</p>
+                      <p className={`text-[11px] truncate ${isCurrent ? 'text-gray-300' : 'text-gray-500'}`}>{track.artist}</p>
                     </div>
-
-                    {/* Reorder & Remove Actions */}
                     <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleReorder(idx, "up")}
-                        disabled={idx === 0}
-                        className={`p-1 border text-xs disabled:opacity-30 ${
-                          isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"
-                        }`}
-                        title="Move Up"
-                      >
+                      <button onClick={() => handleReorder(idx, 'up')} disabled={idx === 0}
+                        className={`p-1 border text-xs disabled:opacity-30 ${isCurrent ? 'border-white hover:bg-neutral-800' : 'border-gray-300 hover:bg-gray-100'}`}>
                         <ArrowUp className="w-3 h-3" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleReorder(idx, "down")}
-                        disabled={idx === queue.length - 1}
-                        className={`p-1 border text-xs disabled:opacity-30 ${
-                          isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"
-                        }`}
-                        title="Move Down"
-                      >
+                      <button onClick={() => handleReorder(idx, 'down')} disabled={idx === queue.length - 1}
+                        className={`p-1 border text-xs disabled:opacity-30 ${isCurrent ? 'border-white hover:bg-neutral-800' : 'border-gray-300 hover:bg-gray-100'}`}>
                         <ArrowDown className="w-3 h-3" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveTrack(idx)}
-                        className={`p-1 border text-xs text-red-500 hover:bg-red-50 ${
-                          isCurrent ? "border-white" : "border-gray-300"
-                        }`}
-                        title="Remove"
-                      >
+                      <button onClick={() => handleRemoveTrack(idx)}
+                        className={`p-1 border text-xs text-red-500 hover:bg-red-50 ${isCurrent ? 'border-white' : 'border-gray-300'}`}>
                         <Trash2 className="w-3 h-3" />
                       </button>
                     </div>
@@ -1088,26 +736,17 @@ const Room = () => {
         </div>
       </main>
 
-      {/* Hidden Audio element controlling synchronization */}
+      {/* Hidden Audio */}
       <audio
         ref={audioRef}
         src={currentTrack?.url}
-        onTimeUpdate={() => {
-          if (audioRef.current) {
-            setCurrentTime(audioRef.current.currentTime);
-          }
-        }}
-        onLoadedMetadata={() => {
-          if (audioRef.current) {
-            setDuration(audioRef.current.duration);
-          }
-        }}
+        onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)}
+        onLoadedMetadata={() => audioRef.current && setDuration(audioRef.current.duration)}
         onEnded={handleNext}
       />
 
-      {/* Bottom status strip */}
-      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
-        Meoww - Monochromatic Audio Streamer
+      <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
+        Meoww - Firebase Powered Audio Sync
       </footer>
     </div>
   );
