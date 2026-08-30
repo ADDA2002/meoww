@@ -31,7 +31,7 @@ const Room = () => {
   // User states
   const [myId, setMyId] = useState<string>("");
   const [userName] = useState<string>(initialName);
-  const [isHost] = useState<boolean>(initialIsHost);
+  const isHost = initialIsHost;
   const [users, setUsers] = useState<RoomUser[]>([]);
 
   // Queue states
@@ -54,6 +54,7 @@ const Room = () => {
   const vetoActiveRef = useRef(vetoActive);
   const isInitializedRef = useRef(false);
   const isPlayingRef = useRef(false);
+  const lastVetoToastRef = useRef<boolean | null>(null);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -126,6 +127,7 @@ const Room = () => {
     const newTime = state.currentTime ?? 0;
     const newIsPlaying = state.isPlaying ?? false;
     const newQueue = state.queue || [];
+    const newVetoActive = state.vetoActive ?? true;
     
     // Update queue if different
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
@@ -133,9 +135,18 @@ const Room = () => {
       setQueue(newQueue);
     }
     
-    // Update veto if different
-    if (state.vetoActive !== undefined && state.vetoActive !== vetoActiveRef.current) {
-      setVetoActive(state.vetoActive);
+    // Handle veto state change - show toast ONLY when it changes
+    if (newVetoActive !== vetoActiveRef.current) {
+      setVetoActive(newVetoActive);
+      // Only show toast if this is coming from host (not initial load)
+      if (lastVetoToastRef.current !== null) {
+        if (newVetoActive) {
+          toast("Host restricted controls. You can add songs only.", { icon: "🔒" });
+        } else {
+          toast("Host restored member controls.", { icon: "🔓" });
+        }
+      }
+      lastVetoToastRef.current = newVetoActive;
     }
     
     // Handle track change
@@ -164,7 +175,7 @@ const Room = () => {
     }
   }, [isHost]);
 
-  // Handle instant messages (veto toggle, kick, ban)
+  // Handle instant messages (kick, ban - NOT veto anymore)
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
     console.log(`[Room] Received message:`, msg.type);
     
@@ -173,24 +184,6 @@ const Room = () => {
         setUsers(msg.users);
         break;
         
-      case "VETO_TOGGLE": {
-        setVetoActive(msg.active);
-        if (msg.active) {
-          if (msg.hostId === myId) {
-            toast.success("Member controls locked.");
-          } else {
-            toast("Host restricted controls. You can add songs only.", { icon: "🔒" });
-          }
-        } else {
-          if (msg.hostId === myId) {
-            toast.success("Member controls restored.");
-          } else {
-            toast("Host restored member controls.", { icon: "🔓" });
-          }
-        }
-        break;
-      }
-      
       case "KICK_USER": {
         if (msg.targetId === myId) {
           setKicked(true);
@@ -275,6 +268,7 @@ const Room = () => {
           
           if (state.vetoActive !== undefined) {
             setVetoActive(state.vetoActive);
+            lastVetoToastRef.current = state.vetoActive;
           }
         }
         
@@ -508,19 +502,21 @@ const Room = () => {
     });
   }, [isHost]);
 
-  // Host toggles veto
+  // Host toggles veto - NOW ONLY USES STATE UPDATE (no message broadcast)
   const handleToggleVeto = useCallback(() => {
     if (!isHost) return;
     const next = !vetoActiveRef.current;
     setVetoActive(next);
     vetoActiveRef.current = next;
-    broadcastRef.current?.({ type: "VETO_TOGGLE", active: next, hostId: myId });
     
-    // Also update state for members
+    // Show toast to host immediately
+    toast.success(next ? "Member controls locked." : "Member controls restored.");
+    
+    // Only update state - this will sync to members via handleStateChange
     updatePlaybackStateRef.current?.({
       vetoActive: next,
     });
-  }, [isHost, myId]);
+  }, [isHost]);
 
   const handleKickUser = useCallback((targetId: string, targetName: string) => {
     if (!isHost) return;
