@@ -222,258 +222,6 @@ const Room = () => {
     return baseName + " " + Date.now();
   };
 
-  // ============= AUDIO PLAYBACK (CORE SYNC LOGIC) =============
-  
-  /**
-   * Plays audio at a specific target time with proper sync.
-   * This is the main function used by both host actions and listener sync.
-   * 
-   * @param targetTime - The exact time in seconds to seek to
-   * @param trackIndex - Which track to play (optional, for track changes)
-   */
-  const playAudioAt = useCallback((targetTime: number, trackIndex?: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // If we're changing to a different track
-    if (trackIndex !== undefined && trackIndex !== currentIndexRef.current) {
-      // Update state will trigger re-render which updates audio.src
-      setCurrentIndex(trackIndex);
-    }
-
-    // Wait for audio to be ready, then seek and play
-    const playWhenReady = () => {
-      // Remove this listener
-      audio.removeEventListener('canplay', playWhenReady);
-      
-      // Calculate how far we need to seek
-      const currentPos = audio.currentTime;
-      const drift = targetTime - currentPos;
-      
-      // Only seek if drift is significant (> 50ms)
-      if (Math.abs(drift) > 0.05) {
-        audio.currentTime = targetTime;
-      }
-      
-      // Play and update state
-      audio.play().then(() => {
-        setIsPlaying(true);
-      }).catch((e) => {
-        console.log("Play blocked:", e);
-      });
-    };
-
-    // Check if audio is already ready to play
-    if (audio.readyState >= 3) { // HAVE_FUTURE_DATA
-      playWhenReady();
-    } else {
-      // Wait for canplay event
-      audio.addEventListener('canplay', playWhenReady);
-      audio.load();
-    }
-  }, []); // No dependencies - this function uses refs
-
-  // ============= PLAYBACK CONTROLS (HOST ACTIONS) =============
-
-  const handleTogglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const now = Date.now();
-
-    if (isPlayingRef.current) {
-      // PAUSE
-      audio.pause();
-      setIsPlaying(false);
-      
-      broadcast({
-        type: "PAUSE",
-        seekTime: audio.currentTime,
-      });
-    } else {
-      // PLAY - play at current position immediately
-      audio.play().then(() => {
-        setIsPlaying(true);
-        
-        broadcast({
-          type: "PLAY",
-          trackIndex: currentIndexRef.current,
-          seekTime: audio.currentTime,
-          timestamp: Date.now(),
-        });
-      }).catch((err) => {
-        console.error("Play failed:", err);
-        toast.error("Couldn't play this track.");
-      });
-    }
-  };
-
-  const handleNext = () => {
-    if (queue.length === 0) return;
-    
-    let nextIdx: number;
-    if (isShuffle) {
-      nextIdx = Math.floor(Math.random() * queue.length);
-    } else {
-      nextIdx = (currentIndex + 1) % queue.length;
-    }
-
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // Play new track from beginning, broadcast to listeners
-    const playWhenReady = () => {
-      audio.removeEventListener('canplay', playWhenReady);
-      audio.currentTime = 0;
-      
-      audio.play().then(() => {
-        setIsPlaying(true);
-        
-        broadcast({
-          type: "PLAY",
-          trackIndex: nextIdx,
-          seekTime: 0,
-          timestamp: Date.now(),
-        });
-      }).catch(console.error);
-    };
-
-    setCurrentIndex(nextIdx);
-
-    // Wait for new audio source to be ready
-    if (audio.readyState >= 3) {
-      playWhenReady();
-    } else {
-      audio.addEventListener('canplay', playWhenReady);
-      audio.load();
-    }
-  };
-
-  const handlePrevious = () => {
-    if (queue.length === 0) return;
-    
-    let prevIdx: number;
-    if (isShuffle) {
-      prevIdx = Math.floor(Math.random() * queue.length);
-    } else {
-      prevIdx = (currentIndex - 1 + queue.length) % queue.length;
-    }
-
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const playWhenReady = () => {
-      audio.removeEventListener('canplay', playWhenReady);
-      audio.currentTime = 0;
-      
-      audio.play().then(() => {
-        setIsPlaying(true);
-        
-        broadcast({
-          type: "PLAY",
-          trackIndex: prevIdx,
-          seekTime: 0,
-          timestamp: Date.now(),
-        });
-      }).catch(console.error);
-    };
-
-    setCurrentIndex(prevIdx);
-
-    if (audio.readyState >= 3) {
-      playWhenReady();
-    } else {
-      audio.addEventListener('canplay', playWhenReady);
-      audio.load();
-    }
-  };
-
-  const handleToggleShuffle = () => {
-    setIsShuffle((prev) => !prev);
-  };
-
-  const handleToggleMute = () => {
-    setIsMuted((prev) => !prev);
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const targetTime = parseFloat(e.target.value);
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    audio.currentTime = targetTime;
-    setCurrentTime(targetTime);
-    
-    broadcast({
-      type: "SEEK",
-      seekTime: targetTime,
-      timestamp: Date.now(),
-    });
-  };
-
-  // ============= SYNC HANDLERS (LISTENER RECEIVES) =============
-
-  const handleSyncPlay = (msg: { trackIndex: number; seekTime: number; timestamp: number }) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // Calculate exact time accounting for network latency
-    // This is the key to millisecond sync:
-    // - msg.seekTime is where the audio WAS on host's machine
-    // - msg.timestamp is when host sent this message
-    // - We calculate how much time passed since then and add to seekTime
-    const elapsedMs = Date.now() - msg.timestamp;
-    const targetTime = msg.seekTime + (elapsedMs / 1000);
-
-    // If track changed, update state (this updates audio.src)
-    if (msg.trackIndex !== currentIndexRef.current) {
-      setCurrentIndex(msg.trackIndex);
-    }
-
-    // Wait for audio to be ready, then seek to exact time and play
-    const playWhenReady = () => {
-      audio.removeEventListener('canplay', playWhenReady);
-      
-      // Seek to exact calculated time
-      audio.currentTime = targetTime;
-      
-      // Play
-      audio.play().then(() => {
-        setIsPlaying(true);
-      }).catch((e) => {
-        console.log("Auto-play blocked:", e);
-      });
-    };
-
-    if (audio.readyState >= 3) {
-      playWhenReady();
-    } else {
-      audio.addEventListener('canplay', playWhenReady);
-      audio.load();
-    }
-  };
-
-  const handleSyncPause = (msg: { seekTime: number }) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    audio.pause();
-    audio.currentTime = msg.seekTime;
-    setIsPlaying(false);
-  };
-
-  const handleSyncSeek = (msg: { seekTime: number; timestamp: number }) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // Apply same latency compensation for seeks
-    const elapsedMs = Date.now() - msg.timestamp;
-    const targetTime = msg.seekTime + (elapsedMs / 1000);
-    
-    audio.currentTime = targetTime;
-    setCurrentTime(targetTime);
-  };
-
   // ============= CONNECTION HANDLING =============
 
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
@@ -582,17 +330,56 @@ const Room = () => {
       }
 
       case "PLAY": {
-        handleSyncPlay(msg);
+        const audio = audioRef.current;
+        if (!audio) return;
+
+        // Calculate the target time accounting for network latency
+        // msg.seekTime is where audio WAS on host when message was sent
+        // We add the time elapsed since the message was sent
+        const elapsedMs = Date.now() - msg.timestamp;
+        const targetTime = msg.seekTime + (elapsedMs / 1000);
+
+        // If track changed, update it
+        if (msg.trackIndex !== currentIndexRef.current) {
+          setCurrentIndex(msg.trackIndex);
+          return; // The audio src will change, then we need to wait for it to load
+        }
+
+        // Same track, just seek and play
+        if (audio.readyState >= 3) {
+          // Audio is ready, seek to exact time and play
+          audio.currentTime = targetTime;
+          audio.play().then(() => setIsPlaying(true)).catch(console.error);
+        } else {
+          // Audio is still loading, wait for it
+          const onCanPlay = () => {
+            audio.removeEventListener('canplay', onCanPlay);
+            audio.currentTime = targetTime;
+            audio.play().then(() => setIsPlaying(true)).catch(console.error);
+          };
+          audio.addEventListener('canplay', onCanPlay);
+        }
         break;
       }
 
       case "PAUSE": {
-        handleSyncPause(msg);
+        const audio = audioRef.current;
+        if (audio) {
+          audio.pause();
+          audio.currentTime = msg.seekTime;
+          setIsPlaying(false);
+        }
         break;
       }
 
       case "SEEK": {
-        handleSyncSeek(msg);
+        const audio = audioRef.current;
+        if (audio) {
+          const elapsedMs = Date.now() - msg.timestamp;
+          const targetTime = msg.seekTime + (elapsedMs / 1000);
+          audio.currentTime = targetTime;
+          setCurrentTime(targetTime);
+        }
         break;
       }
 
@@ -637,6 +424,134 @@ const Room = () => {
         });
       }
     }
+  };
+
+  // ============= PLAYBACK CONTROLS (HOST) =============
+
+  const handleTogglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      // PAUSE
+      audio.pause();
+      setIsPlaying(false);
+      broadcast({
+        type: "PAUSE",
+        seekTime: audio.currentTime,
+      });
+    } else {
+      // PLAY
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: currentIndex,
+          seekTime: audio.currentTime,
+          timestamp: Date.now(),
+        });
+      }).catch((err) => {
+        console.error("Play failed:", err);
+        toast.error("Couldn't play this track.");
+      });
+    }
+  };
+
+  const handleNext = () => {
+    if (queue.length === 0) return;
+    let nextIdx: number;
+    if (isShuffle) {
+      nextIdx = Math.floor(Math.random() * queue.length);
+    } else {
+      nextIdx = (currentIndex + 1) % queue.length;
+    }
+    
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // Preload the next track first, then play
+    const playNewTrack = () => {
+      audio.removeEventListener('canplay', playNewTrack);
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: nextIdx,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
+    };
+
+    setCurrentIndex(nextIdx);
+
+    // Wait for new track to load
+    if (audio.readyState >= 3) {
+      playNewTrack();
+    } else {
+      audio.addEventListener('canplay', playNewTrack);
+      audio.load();
+    }
+  };
+
+  const handlePrevious = () => {
+    if (queue.length === 0) return;
+    let prevIdx: number;
+    if (isShuffle) {
+      prevIdx = Math.floor(Math.random() * queue.length);
+    } else {
+      prevIdx = (currentIndex - 1 + queue.length) % queue.length;
+    }
+    
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const playNewTrack = () => {
+      audio.removeEventListener('canplay', playNewTrack);
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: prevIdx,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
+    };
+
+    setCurrentIndex(prevIdx);
+
+    if (audio.readyState >= 3) {
+      playNewTrack();
+    } else {
+      audio.addEventListener('canplay', playNewTrack);
+      audio.load();
+    }
+  };
+
+  const handleToggleShuffle = () => {
+    setIsShuffle((prev) => !prev);
+  };
+
+  const handleToggleMute = () => {
+    setIsMuted((prev) => !prev);
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const targetTime = parseFloat(e.target.value);
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.currentTime = targetTime;
+    setCurrentTime(targetTime);
+    
+    broadcast({
+      type: "SEEK",
+      seekTime: targetTime,
+      timestamp: Date.now(),
+    });
   };
 
   // ============= QUEUE MANAGEMENT =============
@@ -1055,8 +970,8 @@ const Room = () => {
                           const audio = audioRef.current;
                           if (!audio) return;
 
-                          const playWhenReady = () => {
-                            audio.removeEventListener('canplay', playWhenReady);
+                          const playNewTrack = () => {
+                            audio.removeEventListener('canplay', playNewTrack);
                             audio.currentTime = 0;
                             audio.play().then(() => {
                               setIsPlaying(true);
@@ -1072,9 +987,9 @@ const Room = () => {
                           setCurrentIndex(idx);
 
                           if (audio.readyState >= 3) {
-                            playWhenReady();
+                            playNewTrack();
                           } else {
-                            audio.addEventListener('canplay', playWhenReady);
+                            audio.addEventListener('canplay', playNewTrack);
                             audio.load();
                           }
                         }
@@ -1135,6 +1050,7 @@ const Room = () => {
       <audio
         ref={audioRef}
         src={currentTrack?.url}
+        preload="auto"
         onTimeUpdate={() => {
           if (audioRef.current) {
             setCurrentTime(audioRef.current.currentTime);
