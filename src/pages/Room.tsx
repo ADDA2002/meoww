@@ -4,7 +4,7 @@ import { Track, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 import { Button } from "@/components/ui/button";
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Volume2, VolumeX, Music, Wifi } from "lucide-react";
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Volume2, VolumeX, Music } from "lucide-react";
 
 import RoomDrawer from "@/components/RoomDrawer";
 import { formatTime } from "@/lib/utils";
@@ -320,10 +320,12 @@ const Room = () => {
           <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs font-mono font-semibold text-gray-700 uppercase">
-            <span className="w-1.5 h-1.5 bg-black"></span>
-            <span>{isHost ? "Hosting" : "Synced"}</span>
-          </div>
+          {!isHost && (
+            <div className="flex items-center gap-2 text-xs font-mono font-semibold text-gray-700 uppercase">
+              <span className="w-1.5 h-1.5 bg-black"></span>
+              <span>Synced with host</span>
+            </div>
+          )}
           <RoomDrawer 
             roomCode={roomCode} 
             userName={userName}
@@ -341,92 +343,104 @@ const Room = () => {
       </header>
 
       <main className="flex-1 p-4 max-w-lg mx-auto w-full">
-        <div className="w-full">
-          <div className="w-full aspect-square bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
-            {currentTrack?.cover ? (
-              <img src={currentTrack.cover} alt="Cover" className="w-full h-full object-cover grayscale" />
-            ) : (
-              <Music className="w-24 h-24 text-gray-400" />
-            )}
-          </div>
-
-          <div className="text-center mb-5">
-            <h2 className="text-xl font-bold tracking-tight truncate">
-              {currentTrack?.title || "No Track"}
-            </h2>
-            <p className="text-sm text-gray-600 mt-1 truncate">
-              {currentTrack?.artist || (isHost ? "Add songs to queue" : "Waiting for host...")}
-            </p>
-          </div>
-
-          <div className="mb-5">
-            <input
-              type="range"
-              min={0}
-              max={duration || 100}
-              value={currentTime}
-              onChange={handleSeek}
-              className="w-full accent-black bg-gray-200 h-1.5 appearance-none border border-black cursor-pointer"
-            />
-            <div className="flex justify-between text-xs font-mono text-gray-500 mt-2">
-              <span>{formatTime(currentTime)}</span>
-              <span>{formatTime(duration)}</span>
+        {isHost ? (
+          // HOST VIEW: Full controls
+          <>
+            <div className="w-full aspect-square bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
+              {currentTrack?.cover ? (
+                <img src={currentTrack.cover} alt="Cover" className="w-full h-full object-cover grayscale" />
+              ) : (
+                <Music className="w-24 h-24 text-gray-400" />
+              )}
             </div>
-          </div>
 
-          <div className="flex items-center justify-center gap-4">
-            <Button
-              variant={isShuffle ? "default" : "ghost"}
-              size="icon"
-              onClick={() => setIsShuffle(!isShuffle)}
-              className={`border border-black transition-colors ${
-                isShuffle 
-                  ? "bg-black text-white hover:bg-neutral-800" 
-                  : "bg-white text-black hover:bg-gray-100"
-              }`}
-            >
-              <Shuffle className="w-4 h-4" />
-            </Button>
-            
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handlePrevious}
-              className="p-3 border border-black bg-white hover:bg-gray-100 text-black"
-            >
-              <SkipBack className="w-5 h-5" />
-            </Button>
-            
-            <Button
-              onClick={handleTogglePlay}
-              className="w-16 h-16 border-2 border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center"
-            >
-              {isPlaying ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7 ml-1" />}
-            </Button>
-            
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleNext}
-              className="p-3 border border-black bg-white hover:bg-gray-100 text-black"
-            >
-              <SkipForward className="w-5 h-5" />
-            </Button>
-            
-            <Button
-              variant={isMuted ? "default" : "ghost"}
-              size="icon"
-              onClick={handleToggleMute}
-              className={`border border-black transition-colors ${
-                isMuted 
-                  ? "bg-black text-white hover:bg-neutral-800" 
-                  : "bg-white text-black hover:bg-gray-100"
-              }`}
-            >
-              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </Button>
+            <div className="text-center mb-5">
+              <h2 className="text-xl font-bold tracking-tight truncate">
+                {currentTrack?.title || "No Track"}
+              </h2>
+              <p className="text-sm text-gray-600 mt-1 truncate">
+                {currentTrack?.artist || "Add songs to queue"}
+              </p>
+            </div>
+
+            <div className="mb-5">
+              <input
+                type="range"
+                min={0}
+                max={duration || 100}
+                value={currentTime}
+                onChange={handleSeek}
+                className="w-full accent-black bg-gray-200 h-1.5 appearance-none border border-black cursor-pointer"
+              />
+              <div className="flex justify-between text-xs font-mono text-gray-500 mt-2">
+                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-4">
+              <Button
+                variant={isShuffle ? "default" : "ghost"}
+                size="icon"
+                onClick={() => setIsShuffle(!isShuffle)}
+                className={`border border-black transition-colors ${
+                  isShuffle 
+                    ? "bg-black text-white hover:bg-neutral-800" 
+                    : "bg-white text-black hover:bg-gray-100"
+                }`}
+              >
+                <Shuffle className="w-4 h-4" />
+              </Button>
+              
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handlePrevious}
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black"
+              >
+                <SkipBack className="w-5 h-5" />
+              </Button>
+              
+              <Button
+                onClick={handleTogglePlay}
+                className="w-16 h-16 border-2 border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center"
+              >
+                {isPlaying ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7 ml-1" />}
+              </Button>
+              
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleNext}
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black"
+              >
+                <SkipForward className="w-5 h-5" />
+              </Button>
+              
+              <Button
+                variant={isMuted ? "default" : "ghost"}
+                size="icon"
+                onClick={handleToggleMute}
+                className={`border border-black transition-colors ${
+                  isMuted 
+                    ? "bg-black text-white hover:bg-neutral-800" 
+                    : "bg-white text-black hover:bg-gray-100"
+                }`}
+              >
+                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </Button>
+            </div>
+          </>
+        ) : (
+          // MEMBER VIEW: Just the synced status + track display
+          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+            <div className="flex items-center gap-2 text-sm font-mono font-semibold text-gray-700 uppercase mb-8">
+              <span className="w-2 h-2 bg-black"></span>
+              <span>Synced with host</span>
+            </div>
+            <p className="text-xs font-mono text-gray-400">Waiting for host to start music...</p>
           </div>
-        </div>
+        )}
       </main>
     </div>
   );
