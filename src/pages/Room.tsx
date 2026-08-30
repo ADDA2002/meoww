@@ -17,6 +17,7 @@ import { ConnectionStatus, OfflineBanner } from "@/components/ConnectionStatus";
 
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
+import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -81,7 +82,7 @@ const Room = () => {
     }, 100);
   }, []);
 
-  // Audio player hook - NO auto-play
+  // Audio player hook
   const {
     isPlaying,
     isMuted,
@@ -106,12 +107,62 @@ const Room = () => {
   const pauseRef = useRef(pause);
   const seekRef = useRef(seek);
   const broadcastRef = useRef<((msg: SyncMessage) => void) | null>(null);
+  const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
 
   playRef.current = play;
   pauseRef.current = pause;
   seekRef.current = seek;
 
-  // Handle sync messages from Firebase
+  // Handle state changes from Firebase (PRIMARY sync for playback)
+  const handleStateChange = useCallback((state: FirebaseSyncState) => {
+    console.log(`[Room] State change:`, state);
+    
+    // Only non-host members should follow host's state
+    if (isHost) return;
+    
+    const newIndex = state.currentTrackIndex ?? 0;
+    const newTime = state.currentTime ?? 0;
+    const newIsPlaying = state.isPlaying ?? false;
+    const newQueue = state.queue || [];
+    
+    // Update queue if different
+    if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
+      console.log(`[Room] Updating queue from state: ${newQueue.length} tracks`);
+      setQueue(newQueue);
+    }
+    
+    // Update veto if different
+    if (state.vetoActive !== undefined && state.vetoActive !== vetoActiveRef.current) {
+      setVetoActive(state.vetoActive);
+    }
+    
+    // Handle track change
+    if (newIndex !== currentIndexRef.current) {
+      console.log(`[Room] Track change: ${currentIndexRef.current} -> ${newIndex}`);
+      setCurrentIndex(newIndex);
+    }
+    
+    // Handle play/pause state
+    if (newIsPlaying) {
+      // Only seek+play if not already playing or if significantly out of sync (>1s)
+      const timeDiff = Math.abs(audioRef.current?.currentTime - newTime);
+      if (!isPlayingRef.current || timeDiff > 1) {
+        console.log(`[Room] Syncing play at ${newTime} (timeDiff: ${timeDiff})`);
+        seekRef.current(newTime);
+        setTimeout(() => {
+          playRef.current?.();
+        }, 100);
+      }
+    } else {
+      if (isPlayingRef.current) {
+        console.log(`[Room] Syncing pause at ${newTime}`);
+        seekRef.current(newTime);
+        pauseRef.current?.();
+      }
+    }
+  }, [isHost]);
+
+  // Handle instant messages (veto toggle, kick, ban)
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
     console.log(`[Room] Received message:`, msg.type);
     
@@ -120,48 +171,6 @@ const Room = () => {
         setUsers(msg.users);
         break;
         
-      case "PLAY": {
-        console.log(`[Room] PLAY - track:${msg.trackIndex}, seek:${msg.seekTime}`);
-        
-        // Update track index if different
-        if (currentIndexRef.current !== msg.trackIndex) {
-          setCurrentIndex(msg.trackIndex);
-        }
-        
-        // Calculate latency compensation
-        const latency = (Date.now() - msg.timestamp) / 1000;
-        const targetTime = Math.max(0, msg.seekTime + latency);
-        
-        // Seek to position and play
-        seekRef.current(targetTime);
-        setTimeout(() => {
-          playRef.current?.();
-        }, 50);
-        break;
-      }
-      
-      case "PAUSE": {
-        console.log(`[Room] PAUSE - seek:${msg.seekTime}`);
-        seekRef.current(msg.seekTime);
-        pauseRef.current?.();
-        break;
-      }
-      
-      case "SEEK": {
-        const latency = (Date.now() - msg.timestamp) / 1000;
-        seekRef.current(msg.seekTime + latency);
-        break;
-      }
-      
-      case "UPDATE_QUEUE": {
-        console.log(`[Room] UPDATE_QUEUE - ${msg.queue.length} tracks`);
-        setQueue(msg.queue);
-        if (msg.activeIndex !== undefined) {
-          setCurrentIndex(msg.activeIndex);
-        }
-        break;
-      }
-      
       case "VETO_TOGGLE": {
         setVetoActive(msg.active);
         if (msg.active) {
@@ -207,12 +216,14 @@ const Room = () => {
   // Handle session ended
   const handleSessionEnded = useCallback(() => {
     console.log(`[Room] Session ended`);
-    pauseRef.current?.();
     setSessionEnded(true);
   }, []);
 
+  // Audio ref for time checking
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   // Firebase sync hook
-  const { isConnected, broadcast, kickUser, banUser, getUsers, getState } = useFirebaseSync({
+  const { isConnected, broadcast, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
     roomCode,
     myId,
     userName,
@@ -221,13 +232,15 @@ const Room = () => {
     currentIndex,
     isPlaying,
     onMessage: handleIncomingMessage,
+    onStateChange: handleStateChange,
     onSessionEnded: handleSessionEnded,
   });
 
-  // Store broadcast ref
+  // Store refs
   useEffect(() => {
     broadcastRef.current = broadcast;
-  }, [broadcast]);
+    updatePlaybackStateRef.current = updatePlaybackState;
+  }, [broadcast, updatePlaybackState]);
 
   // Initialize connection
   useEffect(() => {
@@ -264,9 +277,6 @@ const Room = () => {
           if (state.vetoActive !== undefined) {
             setVetoActive(state.vetoActive);
           }
-          
-          // DO NOT auto-play when joining - just load the state
-          // User must explicitly press play
         }
         
         const userList = await getUsers();
@@ -291,24 +301,36 @@ const Room = () => {
   }, [controlsLocked]);
 
   const handleTogglePlay = useCallback(() => {
-    if (!requireControlAccess()) return;
+    if (!isHost) {
+      toast.error("Only the host can control playback.");
+      return;
+    }
 
     if (isPlayingRef.current) {
       pauseRef.current?.();
-      broadcastRef.current?.({ type: "PAUSE", seekTime: getCurrentTime() });
+      const time = getCurrentTime();
+      // Update state with current time for members
+      updatePlaybackStateRef.current?.({
+        isPlaying: false,
+        currentTime: time,
+      });
     } else {
       playRef.current?.();
-      broadcastRef.current?.({
-        type: "PLAY",
-        trackIndex: currentIndexRef.current,
-        seekTime: getCurrentTime(),
-        timestamp: Date.now(),
+      // Update state for members
+      updatePlaybackStateRef.current?.({
+        isPlaying: true,
+        currentTrackIndex: currentIndexRef.current,
+        currentTime: getCurrentTime(),
+        queue: queueRef.current,
       });
     }
-  }, [getCurrentTime, requireControlAccess]);
+  }, [isHost, getCurrentTime]);
 
   const handleNext = useCallback(() => {
-    if (!requireControlAccess()) return;
+    if (!isHost) {
+      toast.error("Only the host can control playback.");
+      return;
+    }
     if (queueRef.current.length === 0) return;
     
     const nextIdx = isShuffleRef.current
@@ -319,12 +341,21 @@ const Room = () => {
     
     setTimeout(() => {
       playRef.current?.();
-      broadcastRef.current?.({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
+      // Update state for members
+      updatePlaybackStateRef.current?.({
+        isPlaying: true,
+        currentTrackIndex: nextIdx,
+        currentTime: 0,
+        queue: queueRef.current,
+      });
     }, 100);
-  }, [requireControlAccess]);
+  }, [isHost]);
 
   const handlePrevious = useCallback(() => {
-    if (!requireControlAccess()) return;
+    if (!isHost) {
+      toast.error("Only the host can control playback.");
+      return;
+    }
     if (queueRef.current.length === 0) return;
     
     const prevIdx = isShuffleRef.current
@@ -335,26 +366,47 @@ const Room = () => {
     
     setTimeout(() => {
       playRef.current?.();
-      broadcastRef.current?.({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
+      // Update state for members
+      updatePlaybackStateRef.current?.({
+        isPlaying: true,
+        currentTrackIndex: prevIdx,
+        currentTime: 0,
+        queue: queueRef.current,
+      });
     }, 100);
-  }, [requireControlAccess]);
+  }, [isHost]);
 
   const handleTrackClick = useCallback((idx: number) => {
-    if (!requireControlAccess()) return;
+    if (!isHost) {
+      toast.error("Only the host can control playback.");
+      return;
+    }
 
     setCurrentIndex(idx);
     
     setTimeout(() => {
       playRef.current?.();
-      broadcastRef.current?.({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
+      // Update state for members
+      updatePlaybackStateRef.current?.({
+        isPlaying: true,
+        currentTrackIndex: idx,
+        currentTime: 0,
+        queue: queueRef.current,
+      });
     }, 100);
-  }, [requireControlAccess]);
+  }, [isHost]);
 
   const handleSeekFromBar = useCallback((time: number) => {
-    if (!requireControlAccess()) return;
+    if (!isHost) {
+      toast.error("Only the host can control playback.");
+      return;
+    }
     seekRef.current(time);
-    broadcastRef.current?.({ type: "SEEK", seekTime: time, timestamp: Date.now() });
-  }, [requireControlAccess]);
+    // Update state for members
+    updatePlaybackStateRef.current?.({
+      currentTime: time,
+    });
+  }, [isHost]);
 
   // Queue management - Add is open to all even during veto
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
@@ -368,9 +420,14 @@ const Room = () => {
 
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
-    broadcastRef.current?.({ type: "UPDATE_QUEUE", queue: updatedQueue, activeIndex: currentIndexRef.current });
+    
+    // Update state for members
+    updatePlaybackStateRef.current?.({
+      queue: updatedQueue,
+      currentTrackIndex: currentIndexRef.current,
+    });
     toast.success("Track added!");
-  }, [userName]);
+  }, [userName, isHost]);
 
   const handleLocalFileUpload = useCallback((file: File) => {
     const fileUrl = URL.createObjectURL(file);
@@ -385,13 +442,27 @@ const Room = () => {
 
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
-    broadcastRef.current?.({ type: "UPDATE_QUEUE", queue: updatedQueue, activeIndex: currentIndexRef.current });
+    
+    // Update state for members
+    updatePlaybackStateRef.current?.({
+      queue: updatedQueue,
+      currentTrackIndex: currentIndexRef.current,
+    });
     toast.success(`Loaded: ${file.name}`);
-  }, [userName]);
+  }, [userName, isHost]);
 
-  // Reorder & Remove - locked during veto
+  // Reorder & Remove - locked for non-host members during veto
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
-    if (!requireControlAccess()) return;
+    if (!isHost) {
+      if (controlsLocked) {
+        toast.error("Host has restricted member controls.");
+        return;
+      }
+      // Non-host in non-locked mode - actually, only host should reorder
+      toast.error("Only the host can reorder the queue.");
+      return;
+    }
+    
     if (direction === "up" && idx === 0) return;
     if (direction === "down" && idx === queueRef.current.length - 1) return;
 
@@ -405,11 +476,20 @@ const Room = () => {
 
     setQueue(newQueue);
     setCurrentIndex(newActive);
-    broadcastRef.current?.({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
-  }, [requireControlAccess]);
+    
+    // Update state for members
+    updatePlaybackStateRef.current?.({
+      queue: newQueue,
+      currentTrackIndex: newActive,
+    });
+  }, [isHost, controlsLocked]);
 
   const handleRemoveTrack = useCallback((idx: number) => {
-    if (!requireControlAccess()) return;
+    if (!isHost) {
+      toast.error("Only the host can remove tracks.");
+      return;
+    }
+    
     if (queueRef.current.length <= 1) {
       toast.error("Queue must have at least one track.");
       return;
@@ -421,8 +501,13 @@ const Room = () => {
     
     setQueue(newQueue);
     setCurrentIndex(newActive);
-    broadcastRef.current?.({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
-  }, [requireControlAccess]);
+    
+    // Update state for members
+    updatePlaybackStateRef.current?.({
+      queue: newQueue,
+      currentTrackIndex: newActive,
+    });
+  }, [isHost]);
 
   // Host toggles veto
   const handleToggleVeto = useCallback(() => {
@@ -431,6 +516,11 @@ const Room = () => {
     setVetoActive(next);
     vetoActiveRef.current = next;
     broadcastRef.current?.({ type: "VETO_TOGGLE", active: next, hostId: myId });
+    
+    // Also update state for members
+    updatePlaybackStateRef.current?.({
+      vetoActive: next,
+    });
   }, [isHost, myId]);
 
   const handleKickUser = useCallback((targetId: string, targetName: string) => {

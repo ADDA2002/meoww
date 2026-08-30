@@ -8,17 +8,9 @@ export interface FirebaseSyncState {
   isPlaying: boolean;
   currentTime: number;
   queue: Track[];
-  users: RoomUser[];
-  lastUpdated: number;
-  timestamp: number;
   vetoActive?: boolean;
-}
-
-export interface FirebaseChatMessage {
-  id: string;
-  sender: string;
-  text: string;
-  time: string;
+  lastUpdateId: string; // Unique ID for each state update to prevent loops
+  lastUpdated: number;
 }
 
 class FirebaseSignaling {
@@ -36,8 +28,8 @@ class FirebaseSignaling {
   private connected: boolean = false;
   private isDestroyed: boolean = false;
   
-  // Track message IDs we've already processed to prevent duplicates
-  private processedMessageIds: Set<string> = new Set();
+  // Track the last update ID we've processed to prevent loops
+  private lastProcessedUpdateId: string = "";
   
   // Store unsubscribe functions for cleanup
   private unsubscribers: (() => void)[] = [];
@@ -75,8 +67,6 @@ class FirebaseSignaling {
           lastSeen: serverTimestamp()
         };
 
-        console.log(`[FirebaseSignaling] Writing my presence to ${this.userRef.toString()}`);
-        
         if (this.isHost) {
           onDisconnect(this.userRef).remove();
           onDisconnect(this.stateRef).remove();
@@ -90,10 +80,8 @@ class FirebaseSignaling {
           this.connected = true;
           this.notifyConnectionState(true);
 
-          // Set up listeners for users, state, and messages
           this.setupListeners();
 
-          // If host, initialize room state
           if (this.isHost) {
             console.log(`[FirebaseSignaling] I am host, initializing room state`);
             set(this.stateRef, {
@@ -103,9 +91,9 @@ class FirebaseSignaling {
               isPlaying: false,
               currentTime: 0,
               queue: [],
-              vetoActive: true, // Default to add-only mode
-              timestamp: Date.now(),
-              lastUpdated: serverTimestamp()
+              vetoActive: true,
+              lastUpdateId: `init-${Date.now()}`,
+              lastUpdated: Date.now()
             });
           }
 
@@ -129,10 +117,9 @@ class FirebaseSignaling {
   }
 
   private setupListeners() {
-    // Listen for room deletion (host left)
+    // Listen for room deletion
     const roomUnsub = onValue(this.roomRef, (snapshot: any) => {
       if (!snapshot.exists() && !this.isDestroyed && !this.isHost) {
-        console.log(`[FirebaseSignaling] 🔔 Room deleted (host left), notifying session ended`);
         this.notifySessionEnded();
       }
     }, (error: any) => {
@@ -143,13 +130,10 @@ class FirebaseSignaling {
     // Listen for user list changes
     const usersUnsub = onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
       const usersData = snapshot.val();
-      console.log(`[FirebaseSignaling] 🔔 onValue users fired, data:`, usersData);
       
-      // Check if host is still present
       if (!this.isHost && usersData) {
         const hostStillPresent = Object.values(usersData).some((u: any) => u.isHost === true && u.id !== this.myId);
         if (!hostStillPresent) {
-          console.log(`[FirebaseSignaling] 🔔 Host no longer present, room should end`);
           this.notifySessionEnded();
           return;
         }
@@ -166,11 +150,16 @@ class FirebaseSignaling {
     });
     this.unsubscribers.push(() => usersUnsub());
 
-    // Listen for state changes (playback sync)
+    // Listen for state changes (PRIMARY sync mechanism)
     const stateUnsub = onValue(this.stateRef, (snapshot: any) => {
       const state = snapshot.val();
-      console.log(`[FirebaseSignaling] 🔔 onValue state fired:`, state ? "exists" : "null");
       if (state) {
+        // Skip if we've already processed this update (prevents loops)
+        if (state.lastUpdateId === this.lastProcessedUpdateId) {
+          return;
+        }
+        this.lastProcessedUpdateId = state.lastUpdateId || "";
+        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex);
         this.notifyStateChange(state);
       }
     }, (error: any) => {
@@ -178,23 +167,15 @@ class FirebaseSignaling {
     });
     this.unsubscribers.push(() => stateUnsub());
 
-    // Listen for messages (chat, moderation, etc.)
+    // Listen for instant action messages (veto, kick, ban, etc.)
     const messagesUnsub = onValue(ref(db, `rooms/${this.roomCode}/messages`), (snapshot: any) => {
       const messages = snapshot.val();
-      console.log(`[FirebaseSignaling] 🔔 onValue messages fired`);
       if (messages) {
-        Object.entries(messages).forEach(([msgId, msg]: [string, any]) => {
-          // Skip if we've already processed this message
-          if (this.processedMessageIds.has(msgId)) return;
-          
-          // Filter out own messages to prevent echo
+        Object.values(messages).forEach((msg: any) => {
+          // Only process messages from other users
           if (msg.senderId !== this.myId) {
-            this.processedMessageIds.add(msgId);
             const { senderId, senderName, timestamp, ...syncMsg } = msg;
             this.notifyMessage(syncMsg as SyncMessage);
-          } else {
-            // Mark own messages as processed
-            this.processedMessageIds.add(msgId);
           }
         });
       }
@@ -236,6 +217,7 @@ class FirebaseSignaling {
     });
   }
 
+  // Send instant action message (veto toggle, kick, ban)
   send(msg: SyncMessage) {
     if (!db) return;
 
@@ -252,17 +234,21 @@ class FirebaseSignaling {
     }, 30000);
   }
 
+  // Update room state (PRIMARY sync mechanism for playback)
   updateState(updates: Partial<FirebaseSyncState>) {
     if (!db || !this.stateRef) return;
 
-    // Use set to overwrite entire state (simpler for sync)
+    const updateId = `${this.myId}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    
     set(this.stateRef, {
       ...updates,
       roomCode: this.roomCode,
-      hostId: this.isHost ? this.myId : updates.hostId,
-      timestamp: Date.now(),
-      lastUpdated: serverTimestamp()
+      hostId: this.isHost ? this.myId : undefined,
+      lastUpdateId: updateId,
+      lastUpdated: Date.now()
     });
+    
+    this.lastProcessedUpdateId = updateId;
   }
 
   onMessage(callback: (msg: SyncMessage) => void) {
@@ -304,7 +290,6 @@ class FirebaseSignaling {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
     
-    // Clean up all Firebase listeners
     this.unsubscribers.forEach(unsub => {
       try {
         unsub();
@@ -316,17 +301,14 @@ class FirebaseSignaling {
 
     if (!db) return;
 
-    // Remove own user presence
     if (this.userRef) {
       remove(this.userRef).catch(() => {});
     }
 
-    // If host, delete entire room
     if (this.isHost && this.roomRef) {
       remove(this.roomRef).catch(() => {});
       this.notifySessionEnded();
     } else {
-      // Check if host is still present before ending session
       get(ref(db, `rooms/${this.roomCode}/users`)).then((snapshot: any) => {
         const usersData = snapshot.val();
         if (usersData) {

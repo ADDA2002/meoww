@@ -11,9 +11,8 @@ interface UseFirebaseSyncOptions {
   currentIndex: number;
   isPlaying: boolean;
   onMessage: (msg: SyncMessage) => void;
+  onStateChange: (state: FirebaseSyncState) => void;
   onSessionEnded?: () => void;
-  onKicked?: (targetName: string, reason?: string) => void;
-  onBanned?: (targetName: string, reason?: string) => void;
 }
 
 export function useFirebaseSync({
@@ -25,9 +24,8 @@ export function useFirebaseSync({
   currentIndex,
   isPlaying,
   onMessage,
+  onStateChange,
   onSessionEnded,
-  onKicked,
-  onBanned,
 }: UseFirebaseSyncOptions) {
   const signalingRef = useRef<FirebaseSignaling | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -46,6 +44,7 @@ export function useFirebaseSync({
     signalingRef.current = signaling;
 
     signaling.onMessage(onMessage);
+    signaling.onStateChange(onStateChange);
     signaling.onConnectionChange(setIsConnected);
 
     if (onSessionEnded) {
@@ -61,34 +60,11 @@ export function useFirebaseSync({
 
   const broadcast = useCallback((msg: SyncMessage) => {
     signalingRef.current?.send(msg);
-    
-    // Also update Firebase state for persistence and other clients to sync
-    if (isHost) {
-      const stateUpdates: Partial<FirebaseSyncState> = {};
-      
-      if (msg.type === "PLAY") {
-        stateUpdates.isPlaying = true;
-        stateUpdates.currentTrackIndex = msg.trackIndex;
-        stateUpdates.currentTime = msg.seekTime;
-        stateUpdates.timestamp = msg.timestamp;
-        stateUpdates.queue = queueRef.current;
-      } else if (msg.type === "PAUSE") {
-        stateUpdates.isPlaying = false;
-        stateUpdates.currentTime = msg.seekTime;
-      } else if (msg.type === "SEEK") {
-        stateUpdates.currentTime = msg.seekTime;
-        stateUpdates.timestamp = msg.timestamp;
-      } else if (msg.type === "UPDATE_QUEUE") {
-        stateUpdates.queue = msg.queue;
-        stateUpdates.currentTrackIndex = msg.activeIndex;
-      } else if (msg.type === "VETO_TOGGLE") {
-        stateUpdates.vetoActive = msg.active;
-      }
-      
-      if (Object.keys(stateUpdates).length > 0) {
-        signalingRef.current?.updateState(stateUpdates);
-      }
-    }
+  }, []);
+
+  const updatePlaybackState = useCallback((updates: Partial<FirebaseSyncState>) => {
+    if (!isHost) return;
+    signalingRef.current?.updateState(updates);
   }, [isHost]);
 
   const kickUser = useCallback((targetId: string, targetName: string, reason?: string) => {
@@ -110,6 +86,7 @@ export function useFirebaseSync({
   return {
     isConnected,
     broadcast,
+    updatePlaybackState,
     kickUser,
     banUser,
     getUsers,
