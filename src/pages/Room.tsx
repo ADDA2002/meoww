@@ -340,9 +340,9 @@ const Room = () => {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center p-4 max-w-lg mx-auto w-full">
+      <main className="flex-1 flex flex-col p-4 max-w-lg mx-auto w-full">
         <div className="w-full">
-          <div className="flex items-center justify-center mb-4 pb-2 border-b border-gray-200 text-xs font-mono">
+          <div className="flex items-center justify-center mb-3 pb-2 border-b border-gray-200 text-xs font-mono">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 bg-black animate-pulse"></span>
               <span className="font-semibold text-gray-700 uppercase">
@@ -351,16 +351,16 @@ const Room = () => {
             </div>
           </div>
 
-          <div className="w-full aspect-square bg-gray-100 border-2 border-black flex items-center justify-center mb-8 overflow-hidden">
+          <div className="w-32 h-32 mx-auto bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
             {currentTrack?.cover ? (
               <img src={currentTrack.cover} alt="Cover" className="w-full h-full object-cover grayscale" />
             ) : (
-              <Music className="w-24 h-24 text-gray-400" />
+              <Music className="w-12 h-12 text-gray-400" />
             )}
           </div>
 
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold tracking-tight truncate">
+          <div className="text-center mb-5">
+            <h2 className="text-xl font-bold tracking-tight truncate">
               {currentTrack?.title || "No Track"}
             </h2>
             <p className="text-sm text-gray-600 mt-1 truncate">
@@ -368,7 +368,7 @@ const Room = () => {
             </p>
           </div>
 
-          <div className="mb-6">
+          <div className="mb-5">
             <input
               type="range"
               min={0}
