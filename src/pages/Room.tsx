@@ -12,7 +12,6 @@ import {
   ArrowUp, 
   ArrowDown, 
   Trash2, 
-  Radio, 
   Music, 
   Upload, 
   Users,
@@ -159,9 +158,12 @@ const Room = () => {
   };
 
   // Generate a unique name by adding a number suffix with a space if there's a conflict
-  const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
+  // The `excludeId` parameter allows excluding a specific user (typically the new joiner themselves)
+  const generateUniqueName = (baseName: string, existingUsers: RoomUser[], excludeId?: string): string => {
     const normalizedBase = baseName.trim().toLowerCase();
-    const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
+    const existingNames = existingUsers
+      .filter(u => u.id !== excludeId)
+      .map(u => u.name.trim().toLowerCase());
     
     if (!existingNames.includes(normalizedBase)) {
       return baseName;
@@ -240,7 +242,8 @@ const Room = () => {
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
     conn.on("open", () => {
       if (isHostRef.current) {
-        const uniqueName = generateUniqueName(me.name, usersRef.current);
+        // Exclude the connecting user's own id from the uniqueness check
+        const uniqueName = generateUniqueName(me.name, usersRef.current, conn.peer);
         const updatedUser = { ...me, name: uniqueName };
 
         if (uniqueName !== me.name) {
@@ -322,7 +325,8 @@ const Room = () => {
 
       case "JOIN": {
         if (isHostRef.current) {
-          const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
+          // Exclude the sender from uniqueness check to avoid name conflicts with itself
+          const uniqueName = generateUniqueName(msg.user.name, usersRef.current, senderPeerId);
           const updatedUser = { ...msg.user, name: uniqueName };
 
           const newUser = updatedUser;
@@ -457,21 +461,6 @@ const Room = () => {
   const handlePeerDisconnect = (disconnectedId: string) => {
     const remainingUsers = usersRef.current.filter((u) => u.id !== disconnectedId);
     setUsers(remainingUsers);
-
-    const wasHost = usersRef.current.find((u) => u.id === disconnectedId)?.isHost;
-    if (wasHost && remainingUsers.length > 0) {
-      const sorted = [...remainingUsers].sort((a, b) => a.joinedAt - b.joinedAt);
-      const nextHost = sorted[0];
-
-      if (nextHost.id === myId) {
-        setIsHost(true);
-        toast.success("Host left. You are now the host!");
-        broadcast({
-          type: "HOST_TRANSFER",
-          newHostId: nextHost.id,
-        });
-      }
-    }
   };
 
   // Play a specific track from a given seek time, ensuring audio is loaded
