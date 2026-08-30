@@ -246,26 +246,21 @@ class FirebaseSignaling {
     this.connectionStateListener.forEach(cb => cb(connected));
   }
 
-  // Only removes user presence, does NOT delete the room
   disconnect() {
     if (!db) return;
 
     if (this.userRef) {
       remove(this.userRef).catch(() => {});
     }
-    
-    // NOTE: Room is NOT deleted when host leaves/navigates away.
-    // This allows joiners to still find and join the room.
-    // If you want to delete the room when the last user leaves,
-    // implement a separate cleanup mechanism (e.g. a cloud function
-    // or TTL-based cleanup).
-  }
 
-  // Explicitly delete the room (call this when host clicks "Leave Room")
-  deleteRoom() {
-    if (!db || !this.isHost) return;
-
-    remove(ref(db, `rooms/${this.roomCode}`)).catch(() => {});
+    if (this.isHost) {
+      onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
+        const users = snapshot.val();
+        if (!users || Object.keys(users).length <= 1) {
+          remove(ref(db, `rooms/${this.roomCode}`)).catch(() => {});
+        }
+      }, { onlyOnce: true } as any);
+    }
   }
 
   isConnected(): boolean {
