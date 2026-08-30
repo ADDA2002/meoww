@@ -5,7 +5,6 @@
  * - Phase 2: Receives "play at" target timestamp from server
  * - Phase 3: Pre-fetches audio file into memory (Blob) during buffer window
  * - Phase 4: Triggers playback at the exact synced millisecond
- * - NEW: Synced pause - triggers pause at the exact synced millisecond
  * 
  * Key insight: We wait for audio to be FULLY BUFFERED before the target time,
  * then trigger .play() at the precise synced moment for zero-delay playback.
@@ -26,20 +25,10 @@ export interface ScheduledTrack {
   error?: string;
 }
 
-export interface ScheduledPause {
-  // The "global target time" (synced clock ms) when playback should PAUSE
-  targetSyncedTime: number;
-  // The position in the track to pause at (in seconds)
-  pauseAtTime: number;
-  // Status
-  status: "pending" | "executed" | "failed";
-}
-
 type SchedulerListener = (tracks: ScheduledTrack[]) => void;
 
 class SyncScheduler {
   private tracks: Map<string, ScheduledTrack> = new Map();
-  private pendingPauses: ScheduledPause[] = [];
   private listeners: SchedulerListener[] = [];
   private audioElement: HTMLAudioElement | null = null;
   private countdownInterval: ReturnType<typeof setInterval> | null = null;
@@ -76,20 +65,6 @@ class SyncScheduler {
     this.prefetchTrack(trackId, track.url);
 
     return trackId;
-  }
-
-  /**
-   * Schedule a pause to occur at a specific synced time.
-   * The pause will be triggered at the exact synced millisecond.
-   */
-  schedulePause(pauseAtTime: number, targetSyncedTime: number): void {
-    console.log(`[SyncScheduler] ⏸️ Pause scheduled at synced time ${targetSyncedTime} (in ${targetSyncedTime - syncedClock.now()}ms), at position ${pauseAtTime}s`);
-    
-    this.pendingPauses.push({
-      targetSyncedTime,
-      pauseAtTime,
-      status: "pending",
-    });
   }
 
   /**
@@ -136,7 +111,7 @@ class SyncScheduler {
 
   /**
    * Phase 4: Start the precision countdown.
-   * Continuously checks the synced clock and triggers playback/pause at the exact moment.
+   * Continuously checks the synced clock and triggers playback at the exact moment.
    */
   startCountdown(): void {
     if (this.countdownInterval) {
@@ -167,8 +142,8 @@ class SyncScheduler {
   }
 
   /**
-   * Check if any scheduled track should play or any scheduled pause should fire RIGHT NOW.
-   * Triggers playback/pause at the exact synced millisecond.
+   * Check if any scheduled track should play RIGHT NOW.
+   * Triggers playback at the exact synced millisecond.
    */
   private checkAndTrigger(): void {
     if (!this.audioElement) {
@@ -182,19 +157,6 @@ class SyncScheduler {
 
     const syncedNow = syncedClock.now();
 
-    // Check for scheduled pauses first
-    for (let i = this.pendingPauses.length - 1; i >= 0; i--) {
-      const pause = this.pendingPauses[i];
-      if (pause.status === "executed" || pause.status === "failed") continue;
-
-      if (syncedNow >= pause.targetSyncedTime) {
-        console.log(`[SyncScheduler] ⏸️ Pause target time reached! Executing pause at position ${pause.pauseAtTime}s`);
-        this.executePause(pause);
-        this.pendingPauses.splice(i, 1);
-      }
-    }
-
-    // Check for scheduled plays
     for (const [trackId, track] of this.tracks.entries()) {
       if (track.status === "playing" || track.status === "failed") continue;
 
@@ -214,30 +176,6 @@ class SyncScheduler {
           console.warn(`[SyncScheduler] ⚠️ Target time reached but blobUrl is undefined! Status: ${track.status}`);
         }
       }
-    }
-  }
-
-  /**
-   * Execute a scheduled pause at the exact synced millisecond.
-   * Seeks to the position first, then pauses.
-   */
-  private executePause(pause: ScheduledPause): void {
-    if (!this.audioElement) {
-      console.error("[SyncScheduler] ❌ No audio element for pause!");
-      pause.status = "failed";
-      return;
-    }
-
-    try {
-      // Seek to the exact position (to be in sync with host)
-      this.audioElement.currentTime = pause.pauseAtTime;
-      // Pause immediately
-      this.audioElement.pause();
-      pause.status = "executed";
-      console.log(`[SyncScheduler] ⏸️ Pause executed at position ${pause.pauseAtTime}s`);
-    } catch (err) {
-      console.error(`[SyncScheduler] ❌ Pause failed:`, err);
-      pause.status = "failed";
     }
   }
 
@@ -320,7 +258,7 @@ class SyncScheduler {
   }
 
   /**
-   * Stop playback and clear all scheduled tracks and pauses.
+   * Stop playback and clear all scheduled tracks.
    */
   clear(): void {
     this.stopCountdown();
@@ -338,7 +276,6 @@ class SyncScheduler {
     }
 
     this.tracks.clear();
-    this.pendingPauses = [];
     this.activeTrackId = null;
     this.notifyListeners();
   }
