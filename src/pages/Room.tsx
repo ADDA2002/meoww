@@ -16,7 +16,6 @@ import { UserList } from "@/components/UserList";
 import { ConnectionStatus, OfflineBanner } from "@/components/ConnectionStatus";
 import { SyncStatusPanel } from "@/components/SyncStatusPanel";
 
-import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 import { syncedClock } from "@/lib/syncedClock";
@@ -50,13 +49,19 @@ const Room = () => {
   const [kicked, setKicked] = useState<boolean>(false);
   const [banned, setBanned] = useState<boolean>(false);
 
+  // Audio state - now driven entirely by syncScheduler for both host and members
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [schedulerIsPlaying, setSchedulerIsPlaying] = useState(false);
+  const isPlaying = schedulerIsPlaying;
+
   // Refs for sync
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
   const vetoActiveRef = useRef(vetoActive);
   const isInitializedRef = useRef(false);
-  const isPlayingRef = useRef(false);
   const lastVetoToastRef = useRef<boolean | null>(null);
   const isClockCalibratedRef = useRef(false);
 
@@ -70,77 +75,69 @@ const Room = () => {
   // Convenience: non-host members are "locked" when veto is on
   const controlsLocked = !isHost && vetoActive;
 
-  // Handle track end - advance to next track
-  const handleTrackEnded = useCallback(() => {
-    if (queueRef.current.length === 0) return;
-    isPlayingRef.current = false;
-
-    const nextIdx = isShuffleRef.current
-      ? Math.floor(Math.random() * queueRef.current.length)
-      : (currentIndexRef.current + 1) % queueRef.current.length;
-
-    setCurrentIndex(nextIdx);
-    
-    // Auto-advance: schedule next track with synced clock
-    const nextTrack = queueRef.current[nextIdx];
-    if (nextTrack && isHost && syncedClock.isReady()) {
-      // Schedule to start 2 seconds from now (synced time)
-      const targetTime = syncedClock.now() + 2000;
-      syncScheduler.scheduleTrack(nextTrack, targetTime, `track-${nextIdx}`);
-      syncScheduler.startCountdown();
-    }
-  }, []);
-
-  // Audio player hook (for non-host, this also drives UI)
-  const {
-    isPlaying: audioPlayerIsPlaying,
-    isMuted,
-    setIsMuted,
-    currentTime,
-    duration,
-    play,
-    pause,
-    seek,
-    getCurrentTime,
-  } = useAudioPlayer({
-    track: currentTrack,
-    isHost,
-    onTimeUpdate: () => {},
-    onTrackEnded: handleTrackEnded,
-  });
-
-  /**
-   * Derive the REAL isPlaying state.
-   * The host's playback happens via syncScheduler (precision-timed).
-   * Members' playback happens via useAudioPlayer (seek+play).
-   * We track both and combine them.
-   */
-  const [schedulerIsPlaying, setSchedulerIsPlaying] = useState(false);
-  const isPlaying = isHost ? schedulerIsPlaying : audioPlayerIsPlaying;
-  isPlayingRef.current = isPlaying;
-
-  // Subscribe to scheduler to know when host's music is actually playing
+  // Subscribe to syncScheduler to track playback state, time, and duration
   useEffect(() => {
-    if (!isHost) return;
-    const unsub = syncScheduler.subscribe((tracks) => {
-      const anyPlaying = tracks.some(t => t.status === "playing");
-      setSchedulerIsPlaying(anyPlaying);
-    });
-    return () => unsub();
+    const audioEl = syncScheduler.getAudioElement();
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audioEl.currentTime || 0);
+    };
+    const handleLoadedMetadata = () => {
+      setDuration(audioEl.duration || 0);
+    };
+    const handlePlay = () => {
+      setSchedulerIsPlaying(true);
+    };
+    const handlePause = () => {
+      setSchedulerIsPlaying(false);
+    };
+    const handleEnded = () => {
+      setSchedulerIsPlaying(false);
+      // Auto-advance for host
+      if (isHost && queueRef.current.length > 0) {
+        const nextIdx = isShuffleRef.current
+          ? Math.floor(Math.random() * queueRef.current.length)
+          : (currentIndexRef.current + 1) % queueRef.current.length;
+
+        setCurrentIndex(nextIdx);
+        const nextTrack = queueRef.current[nextIdx];
+        if (nextTrack && syncedClock.isReady()) {
+          const targetTime = syncedClock.now() + 2000;
+          syncScheduler.scheduleTrack(nextTrack, targetTime, `track-${nextIdx}`);
+          syncScheduler.startCountdown();
+        }
+      }
+    };
+
+    audioEl.addEventListener("timeupdate", handleTimeUpdate);
+    audioEl.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audioEl.addEventListener("play", handlePlay);
+    audioEl.addEventListener("pause", handlePause);
+    audioEl.addEventListener("ended", handleEnded);
+
+    return () => {
+      audioEl.removeEventListener("timeupdate", handleTimeUpdate);
+      audioEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audioEl.removeEventListener("play", handlePlay);
+      audioEl.removeEventListener("pause", handlePause);
+      audioEl.removeEventListener("ended", handleEnded);
+    };
   }, [isHost]);
 
-  // Keep play/pause refs updated
-  const playRef = useRef(play);
-  const pauseRef = useRef(pause);
-  const seekRef = useRef(seek);
-  const broadcastRef = useRef<((msg: SyncMessage) => void) | null>(null);
-  const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
-  const getCurrentTimeRef = useRef(getCurrentTime);
+  const handleSeek = useCallback((time: number) => {
+    const audioEl = syncScheduler.getAudioElement();
+    audioEl.currentTime = time;
+    setCurrentTime(time);
+  }, []);
 
-  playRef.current = play;
-  pauseRef.current = pause;
-  seekRef.current = seek;
-  getCurrentTimeRef.current = getCurrentTime;
+  const handleToggleMute = useCallback(() => {
+    const next = !isMuted;
+    setIsMuted(next);
+    syncScheduler.getAudioElement().muted = next;
+  }, [isMuted]);
+
+  // Keep play/pause refs updated
+  const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
 
   // Phase 1: Calibrate the synced clock when the room is ready
   useEffect(() => {
@@ -162,7 +159,6 @@ const Room = () => {
     
     const newIndex = state.currentTrackIndex ?? 0;
     const newTime = state.currentTime ?? 0;
-    const newIsPlaying = state.isPlaying ?? false;
     const newQueue = state.queue || [];
     const newVetoActive = state.vetoActive ?? true;
     const newTargetSyncedTime = state.targetSyncedTime;
@@ -186,37 +182,27 @@ const Room = () => {
       lastVetoToastRef.current = newVetoActive;
     }
     
-    // Handle scheduled track from host
+    // Handle scheduled track from host - this is the PRIMARY sync mechanism
     if (newTargetSyncedTime && newIndex !== undefined) {
       const trackToSchedule = newQueue[newIndex];
       if (trackToSchedule) {
         console.log(`[Room] 📅 Received scheduled track: ${trackToSchedule.title} at synced time ${newTargetSyncedTime}`);
         syncScheduler.scheduleTrack(trackToSchedule, newTargetSyncedTime, `track-${newIndex}`);
         syncScheduler.startCountdown();
+        setCurrentIndex(newIndex);
       }
-    }
-    
-    // Handle track change
-    if (newIndex !== currentIndexRef.current) {
+    } else if (newIndex !== currentIndexRef.current) {
+      // Track change without scheduled time
       console.log(`[Room] Track change: ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
     }
-    
-    // Handle play/pause state (for immediate response, not scheduled)
-    if (newIsPlaying) {
-      const timeDiff = Math.abs(getCurrentTimeRef.current() - newTime);
-      if (!isPlayingRef.current || timeDiff > 1) {
-        console.log(`[Room] Syncing play at ${newTime} (timeDiff: ${timeDiff})`);
-        seekRef.current(newTime);
-        setTimeout(() => {
-          playRef.current?.();
-        }, 100);
-      }
-    } else {
-      if (isPlayingRef.current) {
-        console.log(`[Room] Syncing pause at ${newTime}`);
-        seekRef.current(newTime);
-        pauseRef.current?.();
+
+    // Handle seek for already-playing track
+    if (newTime !== undefined && newTime > 0) {
+      const audioEl = syncScheduler.getAudioElement();
+      // Only seek if there's a meaningful difference
+      if (Math.abs(audioEl.currentTime - newTime) > 1.5) {
+        audioEl.currentTime = newTime;
       }
     }
   }, [isHost]);
@@ -261,7 +247,7 @@ const Room = () => {
   }, []);
 
   // Firebase sync hook
-  const { isConnected, broadcast, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
+  const { isConnected, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
     roomCode,
     myId,
     userName,
@@ -276,9 +262,8 @@ const Room = () => {
 
   // Store refs
   useEffect(() => {
-    broadcastRef.current = broadcast;
     updatePlaybackStateRef.current = updatePlaybackState;
-  }, [broadcast, updatePlaybackState]);
+  }, [updatePlaybackState]);
 
   // Initialize connection
   useEffect(() => {
@@ -347,15 +332,6 @@ const Room = () => {
     loadInitialState();
   }, [isConnected, myId, isHost, getState, getUsers]);
 
-  // Guard: prevent locked members from triggering sync actions
-  const requireControlAccess = useCallback((): boolean => {
-    if (controlsLocked) {
-      toast.error("Host has restricted member controls. You can only add songs.");
-      return false;
-    }
-    return true;
-  }, [controlsLocked]);
-
   /**
    * Phase 2: Host schedules a track with a synced target time.
    * This is the main entry point for the host to start a track.
@@ -396,19 +372,20 @@ const Room = () => {
       return;
     }
 
-    if (schedulerIsPlaying) {
+    const audioEl = syncScheduler.getAudioElement();
+    
+    if (!audioEl.paused) {
       // Currently playing -> pause
-      syncScheduler.clear();
+      audioEl.pause();
       updatePlaybackStateRef.current?.({
         isPlaying: false,
-        currentTime: 0,
         targetSyncedTime: undefined,
       });
     } else {
       // Not playing -> schedule current track
       scheduleTrackForPlayback(currentIndexRef.current, 2000);
     }
-  }, [isHost, schedulerIsPlaying, scheduleTrackForPlayback]);
+  }, [isHost, scheduleTrackForPlayback]);
 
   const handleNext = useCallback(() => {
     if (!isHost) {
@@ -452,11 +429,9 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-    // Seek the scheduler's audio element if it's playing
+    // Seek the scheduler's audio element
     const schedulerAudio = syncScheduler.getAudioElement();
-    if (schedulerAudio) {
-      schedulerAudio.currentTime = time;
-    }
+    schedulerAudio.currentTime = time;
     updatePlaybackStateRef.current?.({
       currentTime: time,
     });
@@ -734,7 +709,7 @@ const Room = () => {
               onNext={handleNext}
               onPrevious={handlePrevious}
               onToggleShuffle={() => setIsShuffle(!isShuffle)}
-              onToggleMute={() => setIsMuted(!isMuted)}
+              onToggleMute={handleToggleMute}
             />
           </div>
 
