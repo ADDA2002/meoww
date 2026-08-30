@@ -44,14 +44,15 @@ const Room = () => {
   const initialName = formatDisplayName(searchParams.get("name") || "Guest");
   const initialIsHost = searchParams.get("host") === "true";
 
-  // Peer & connection states
+  // ============= STATE =============
+  // Peer & connection
   const [myId, setMyId] = useState<string>("");
   const [userName, setUserName] = useState<string>(initialName);
   const [isHost, setIsHost] = useState<boolean>(initialIsHost);
   const [users, setUsers] = useState<RoomUser[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
 
-  // Audio & Queue states
+  // Audio & Queue
   const [queue, setQueue] = useState<Track[]>(DEFAULT_TRACKS);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -61,13 +62,13 @@ const Room = () => {
   const [duration, setDuration] = useState<number>(0);
   const [ping, setPing] = useState<number>(0);
 
-  // Add Song Dialog State
+  // Add Song Dialog
   const [addSongOpen, setAddSongOpen] = useState(false);
   const [songTitle, setSongTitle] = useState("");
   const [songArtist, setSongArtist] = useState("");
   const [songUrl, setSongUrl] = useState("");
 
-  // Refs
+  // ============= REFS =============
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
@@ -76,13 +77,15 @@ const Room = () => {
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
 
-  // Keep refs updated for event callbacks
-  usersRef.current = users;
-  queueRef.current = queue;
-  isHostRef.current = isHost;
-  currentIndexRef.current = currentIndex;
+  // Keep refs synced with state for use inside event handlers
+  useEffect(() => { usersRef.current = users; }, [users]);
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { isHostRef.current = isHost; }, [isHost]);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
   const currentTrack = queue[currentIndex] || null;
+
+  // ============= EFFECTS =============
 
   // Sync mute state to audio element
   useEffect(() => {
@@ -93,26 +96,23 @@ const Room = () => {
 
   // Ping measurement (listeners only)
   useEffect(() => {
-    if (isHost) return; // Only listeners ping the host
+    if (isHost) return;
 
     const measurePing = () => {
       const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
       const testPeer = new Peer(`${myId}-ping-${Date.now()}`, { debug: 0 });
-      
+      const startTime = Date.now();
+
       const timeout = setTimeout(() => {
         try { testPeer.destroy(); } catch (e) { /* noop */ }
-        // Use last known ping or show dash
-        setPing((prev) => prev || 0);
-      }, 2000);
+      }, 3000);
 
       testPeer.on("open", () => {
-        const startTime = Date.now();
         const conn = testPeer.connect(hostPeerId, { reliable: true });
 
         conn.on("open", () => {
           clearTimeout(timeout);
-          const endTime = Date.now();
-          setPing(endTime - startTime);
+          setPing(Date.now() - startTime);
           try { conn.close(); } catch (e) { /* noop */ }
           try { testPeer.destroy(); } catch (e) { /* noop */ }
         });
@@ -129,10 +129,7 @@ const Room = () => {
       });
     };
 
-    // Initial ping after connection
-    const initialTimer = setTimeout(measurePing, 1000);
-    
-    // Re-ping every 5 seconds
+    const initialTimer = setTimeout(measurePing, 1500);
     const interval = setInterval(measurePing, 5000);
 
     return () => {
@@ -141,54 +138,17 @@ const Room = () => {
     };
   }, [isHost, roomCode, myId]);
 
-  // Broadcast message to all active peer connections
-  const broadcast = (msg: SyncMessage) => {
-    connectionsRef.current.forEach((conn) => {
-      if (conn.open) {
-        conn.send(msg);
-      }
-    });
-  };
-
-  // Generate a unique name by adding a number suffix with a space if there's a conflict
-  const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
-    // Always store the comparison name in formatted form (first capital, rest lowercase)
-    const normalizedBase = baseName.trim().toLowerCase();
-    const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
-    
-    // Check if base name already exists
-    if (!existingNames.includes(normalizedBase)) {
-      return baseName;
-    }
-    
-    // Try adding numbers at the end with a space until we find a unique one
-    // e.g., "Alex" becomes "Alex 1", "Alex 2", etc.
-    for (let i = 1; i <= 999; i++) {
-      const candidate = baseName + " " + i;
-      if (!existingNames.includes(candidate.toLowerCase())) {
-        return candidate;
-      }
-    }
-    
-    // Fallback: add timestamp suffix
-    return baseName + " " + Date.now();
-  };
-
-  // 1. Initialize PeerJS connection
+  // Initialize PeerJS connection
   useEffect(() => {
     if (!roomCode) return;
 
-    // A deterministic peer ID for the host so others can join, and random for listeners
     const generatedId = isHost 
       ? `meoww-room-${roomCode.toLowerCase()}` 
       : `meoww-user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
     setMyId(generatedId);
 
-    // Generate unique name if needed (only for non-hosts joining)
     const finalName = isHost ? userName : generateUniqueName(userName, []);
-    
-    // Update the displayed name if it changed
     if (finalName !== userName) {
       setUserName(finalName);
     }
@@ -202,16 +162,13 @@ const Room = () => {
 
     setUsers([currentUser]);
 
-    const peer = new Peer(generatedId, {
-      debug: 1,
-    });
+    const peer = new Peer(generatedId, { debug: 1 });
     peerRef.current = peer;
 
-    peer.on("open", (id) => {
+    peer.on("open", () => {
       setIsConnected(true);
       
       if (!isHost) {
-        // Connect to host peer
         const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
         const conn = peer.connect(hostPeerId, { reliable: true });
         setupConnection(conn, currentUser);
@@ -227,7 +184,7 @@ const Room = () => {
       if (err.type === "unavailable-id" && isHost) {
         toast.error("Room host already active. Joining as listener.");
         setIsHost(false);
-      } else {
+      } else if (err.type !== "network" && err.type !== "peer-unavailable") {
         toast.error("Connection notice: " + (err.message || "Working in local mode."));
       }
     });
@@ -237,73 +194,90 @@ const Room = () => {
     };
   }, [roomCode]);
 
-  // Connection data handler
+  // ============= HELPER FUNCTIONS =============
+
+  // Broadcast message to all connected peers
+  const broadcast = (msg: SyncMessage) => {
+    connectionsRef.current.forEach((conn) => {
+      if (conn.open) {
+        conn.send(msg);
+      }
+    });
+  };
+
+  // Generate unique name if there's a conflict
+  const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
+    const normalizedBase = baseName.trim().toLowerCase();
+    const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
+    
+    if (!existingNames.includes(normalizedBase)) {
+      return baseName;
+    }
+    
+    for (let i = 1; i <= 999; i++) {
+      const candidate = baseName + " " + i;
+      if (!existingNames.includes(candidate.toLowerCase())) {
+        return candidate;
+      }
+    }
+    
+    return baseName + " " + Date.now();
+  };
+
+  // ============= CONNECTION HANDLING =============
+
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
     conn.on("open", () => {
-      // If this connection is from a listener trying to join the host
       if (isHostRef.current) {
-        // Check for duplicate name (case-insensitive) and generate unique name
         const uniqueName = generateUniqueName(me.name, usersRef.current);
         const updatedUser = { ...me, name: uniqueName };
 
-        // If name was changed, notify the user
-        if (uniqueName !== me.name) {
-          // Send the updated user info with the new name
-          connectionsRef.current.set(conn.peer, conn);
-          
-          // Send JOIN with the unique name
-          conn.send({
-            type: "JOIN",
-            user: updatedUser,
-          });
-          
-          // Send notification to the user about their new name
-          conn.send({
-            type: "NAME_UPDATE",
-            newName: uniqueName,
-            originalName: me.name,
-          });
-          
-          return;
-        }
-
         connectionsRef.current.set(conn.peer, conn);
 
-        // If listener connecting to host, announce self
+        // Send JOIN with potentially updated name
         conn.send({
           type: "JOIN",
-          user: me,
+          user: updatedUser,
         });
 
-        // If host, send current state to the new listener
-        if (isHostRef.current) {
-          const audio = audioRef.current;
-          const currentSeek = audio ? audio.currentTime : 0;
-          
-          conn.send({
-            type: "USER_LIST",
-            users: [...usersRef.current, { id: conn.peer, name: "Connecting...", isHost: false, joinedAt: Date.now() }],
-          });
+        // Send current state to new listener
+        const audio = audioRef.current;
+        const currentSeek = audio ? audio.currentTime : 0;
 
-          conn.send({
-            type: "UPDATE_QUEUE",
-            queue: queueRef.current,
-            activeIndex: currentIndexRef.current,
-          });
+        conn.send({
+          type: "USER_LIST",
+          users: [...usersRef.current, updatedUser],
+        });
 
-          if (audio && !audio.paused) {
-            conn.send({
-              type: "PLAY",
-              trackIndex: currentIndexRef.current,
-              seekTime: currentSeek,
-              timestamp: Date.now(),
-            });
-          }
+        conn.send({
+          type: "UPDATE_QUEUE",
+          queue: queueRef.current,
+          activeIndex: currentIndexRef.current,
+        });
+
+        if (audio && !audio.paused) {
+          conn.send({
+            type: "PLAY",
+            trackIndex: currentIndexRef.current,
+            seekTime: currentSeek,
+            timestamp: Date.now(),
+          });
+        }
+
+        // If name was changed, notify the user
+        if (uniqueName !== me.name) {
+          setTimeout(() => {
+            if (conn.open) {
+              conn.send({
+                type: "NAME_UPDATE",
+                newName: uniqueName,
+                originalName: me.name,
+              });
+            }
+          }, 100);
         }
       } else {
         connectionsRef.current.set(conn.peer, conn);
-        
-        // If listener connecting to host, announce self
         conn.send({
           type: "JOIN",
           user: me,
@@ -321,28 +295,22 @@ const Room = () => {
     });
   };
 
-  // Handle incoming protocol messages
   const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
     switch (msg.type) {
       case "NAME_UPDATE": {
-        // Update our displayed name if the host assigned us a new one
         setUserName(msg.newName);
         toast.info(`Your name was updated to "${msg.newName}" because "${msg.originalName}" was taken.`);
         break;
       }
 
       case "JOIN": {
-        // If we're the host, do a final duplicate check before adding
         if (isHostRef.current) {
           const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
           const updatedUser = { ...msg.user, name: uniqueName };
-
-          const newUser = updatedUser;
-          const updatedUsers = [...usersRef.current.filter(u => u.id !== newUser.id), newUser];
+          const updatedUsers = [...usersRef.current.filter(u => u.id !== updatedUser.id), updatedUser];
           setUsers(updatedUsers);
           
           if (uniqueName !== msg.user.name) {
-            // Notify the user about the name change
             const conn = connectionsRef.current.get(senderPeerId);
             if (conn && conn.open) {
               conn.send({
@@ -353,28 +321,10 @@ const Room = () => {
             }
             toast.info(`${msg.user.name} joined as "${uniqueName}" (name adjusted).`);
           } else {
-            toast.info(`${newUser.name} joined the jam!`);
+            toast.info(`${updatedUser.name} joined the jam!`);
           }
 
-          if (isHostRef.current) {
-            broadcast({
-              type: "USER_LIST",
-              users: updatedUsers,
-            });
-          }
-          break;
-        }
-
-        const newUser = msg.user;
-        const updatedUsers = [...usersRef.current.filter(u => u.id !== newUser.id), newUser];
-        setUsers(updatedUsers);
-        toast.info(`${newUser.name} joined the jam!`);
-
-        if (isHostRef.current) {
-          broadcast({
-            type: "USER_LIST",
-            users: updatedUsers,
-          });
+          broadcast({ type: "USER_LIST", users: updatedUsers });
         }
         break;
       }
@@ -388,7 +338,6 @@ const Room = () => {
         const audio = audioRef.current;
         if (!audio) return;
 
-        // Millisecond accurate sync compensation
         const latencySec = (Date.now() - msg.timestamp) / 1000;
         const targetTime = msg.seekTime + latencySec;
 
@@ -396,13 +345,19 @@ const Room = () => {
           setCurrentIndex(msg.trackIndex);
         }
 
-        if (Math.abs(audio.currentTime - targetTime) > 0.15) {
-          audio.currentTime = targetTime;
-        }
+        // Wait for the audio source to be ready before playing
+        const playWhenReady = () => {
+          if (Math.abs(audio.currentTime - targetTime) > 0.15) {
+            audio.currentTime = targetTime;
+          }
+          audio.play().then(() => setIsPlaying(true)).catch((e) => {
+            console.log("Auto-play blocked, user click needed:", e);
+          });
+          audio.removeEventListener('canplay', playWhenReady);
+        };
 
-        audio.play().then(() => setIsPlaying(true)).catch((e) => {
-          console.log("Auto-play blocked, user click needed:", e);
-        });
+        audio.addEventListener('canplay', playWhenReady);
+        audio.load();
         break;
       }
 
@@ -448,14 +403,12 @@ const Room = () => {
     }
   };
 
-  // If host leaves, automatic host failover to the next joined user
   const handlePeerDisconnect = (disconnectedId: string) => {
     const remainingUsers = usersRef.current.filter((u) => u.id !== disconnectedId);
     setUsers(remainingUsers);
 
     const wasHost = usersRef.current.find((u) => u.id === disconnectedId)?.isHost;
     if (wasHost && remainingUsers.length > 0) {
-      // Pick the next earliest joined participant
       const sorted = [...remainingUsers].sort((a, b) => a.joinedAt - b.joinedAt);
       const nextHost = sorted[0];
 
@@ -470,12 +423,41 @@ const Room = () => {
     }
   };
 
-  // Playback audio element controls
+  // ============= PLAYBACK CONTROLS =============
+
+  // Helper: Play a specific track index from the beginning
+  const playTrackAt = (trackIndex: number) => {
+    if (trackIndex < 0 || trackIndex >= queue.length) return;
+
+    setCurrentIndex(trackIndex);
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const playWhenReady = () => {
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: trackIndex,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
+      audio.removeEventListener('canplay', playWhenReady);
+    };
+
+    audio.addEventListener('canplay', playWhenReady);
+    audio.load();
+  };
+
+  // PLAY / PAUSE toggle
   const handleTogglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
     if (isPlaying) {
+      // Currently playing → pause
       audio.pause();
       setIsPlaying(false);
       broadcast({
@@ -483,6 +465,7 @@ const Room = () => {
         seekTime: audio.currentTime,
       });
     } else {
+      // Currently paused → play
       audio.play().then(() => {
         setIsPlaying(true);
         broadcast({
@@ -491,60 +474,48 @@ const Room = () => {
           seekTime: audio.currentTime,
           timestamp: Date.now(),
         });
-      }).catch(console.error);
+      }).catch((err) => {
+        console.error("Play failed:", err);
+        toast.error("Couldn't play this track. Try again.");
+      });
     }
   };
 
+  // NEXT song
   const handleNext = () => {
     if (queue.length === 0) return;
-    let nextIdx = 0;
+    let nextIdx: number;
     if (isShuffle) {
       nextIdx = Math.floor(Math.random() * queue.length);
     } else {
       nextIdx = (currentIndex + 1) % queue.length;
     }
-    setCurrentIndex(nextIdx);
-
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({
-          type: "PLAY",
-          trackIndex: nextIdx,
-          seekTime: 0,
-          timestamp: Date.now(),
-        });
-      }).catch(console.error);
-    }
+    playTrackAt(nextIdx);
   };
 
+  // PREVIOUS song
   const handlePrevious = () => {
     if (queue.length === 0) return;
-    let prevIdx = 0;
+    let prevIdx: number;
     if (isShuffle) {
       prevIdx = Math.floor(Math.random() * queue.length);
     } else {
       prevIdx = (currentIndex - 1 + queue.length) % queue.length;
     }
-    setCurrentIndex(prevIdx);
-
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({
-          type: "PLAY",
-          trackIndex: prevIdx,
-          seekTime: 0,
-          timestamp: Date.now(),
-        });
-      }).catch(console.error);
-    }
+    playTrackAt(prevIdx);
   };
 
+  // SHUFFLE toggle
+  const handleToggleShuffle = () => {
+    setIsShuffle((prev) => !prev);
+  };
+
+  // MUTE toggle
+  const handleToggleMute = () => {
+    setIsMuted((prev) => !prev);
+  };
+
+  // SEEK (scrub)
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const targetTime = parseFloat(e.target.value);
     const audio = audioRef.current;
@@ -558,6 +529,8 @@ const Room = () => {
       });
     }
   };
+
+  // ============= QUEUE MANAGEMENT =============
 
   const handleAddSong = (e: React.FormEvent) => {
     e.preventDefault();
@@ -589,7 +562,6 @@ const Room = () => {
     toast.success("Track added to queue!");
   };
 
-  // Upload local MP3 file (for user's test.mp3 or local music)
   const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -622,11 +594,8 @@ const Room = () => {
 
     const targetIdx = direction === "up" ? idx - 1 : idx + 1;
     const newQueue = [...queue];
-    const temp = newQueue[idx];
-    newQueue[idx] = newQueue[targetIdx];
-    newQueue[targetIdx] = temp;
+    [newQueue[idx], newQueue[targetIdx]] = [newQueue[targetIdx], newQueue[idx]];
 
-    // update active index if needed
     let newActive = currentIndex;
     if (currentIndex === idx) {
       newActive = targetIdx;
@@ -690,34 +659,27 @@ const Room = () => {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
+  // ============= RENDER =============
+
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
-      {/* Top Room Navigation Bar */}
+      {/* Top Navigation */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
         <div className="flex items-center gap-2">
-          <img
-            src="/logo.gif"
-            alt="Meoww Logo"
-            className="w-8 h-8 object-contain"
-          />
+          <img src="/logo.gif" alt="Meoww Logo" className="w-8 h-8 object-contain" />
           <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
         </div>
         <div className="flex items-center gap-2">
-          <RoomDrawer
-            roomCode={roomCode}
-            userName={userName}
-            onLeave={handleLeaveRoom}
-          />
+          <RoomDrawer roomCode={roomCode} userName={userName} onLeave={handleLeaveRoom} />
         </div>
       </header>
 
-      {/* Main Room Layout */}
+      {/* Main Content */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Music Player & Host Dashboard */}
+        {/* Left: Player */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Active Player Card */}
           <div className="border border-black bg-white p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] relative">
-            {/* Latency & Host Status Bar */}
+            {/* Status Bar */}
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 text-xs font-mono">
               <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 ${isConnected ? "bg-black" : "bg-red-500"} animate-pulse`}></span>
@@ -753,7 +715,7 @@ const Room = () => {
               </div>
             </div>
 
-            {/* Time progress bar */}
+            {/* Progress Bar */}
             <div className="space-y-1.5 mb-6">
               <input
                 type="range"
@@ -770,15 +732,16 @@ const Room = () => {
               </div>
             </div>
 
-            {/* Controls Row */}
+            {/* Controls */}
             <div className="flex items-center justify-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => setIsShuffle(!isShuffle)}
+                onClick={handleToggleShuffle}
                 className={`p-2 border border-black transition-colors ${
                   isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
                 title="Toggle Shuffle"
+                aria-label="Toggle Shuffle"
               >
                 <Shuffle className="w-4 h-4" />
               </button>
@@ -788,6 +751,7 @@ const Room = () => {
                 onClick={handlePrevious}
                 className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
                 title="Previous Song"
+                aria-label="Previous Song"
               >
                 <SkipBack className="w-5 h-5" />
               </button>
@@ -797,6 +761,7 @@ const Room = () => {
                 onClick={handleTogglePlay}
                 className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors"
                 title={isPlaying ? "Pause" : "Play"}
+                aria-label={isPlaying ? "Pause" : "Play"}
               >
                 {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
               </button>
@@ -806,17 +771,19 @@ const Room = () => {
                 onClick={handleNext}
                 className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
                 title="Next Song"
+                aria-label="Next Song"
               >
                 <SkipForward className="w-5 h-5" />
               </button>
 
               <button
                 type="button"
-                onClick={() => setIsMuted(!isMuted)}
+                onClick={handleToggleMute}
                 className={`p-2 border border-black transition-colors ${
                   isMuted ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
                 title={isMuted ? "Unmute" : "Mute"}
+                aria-label={isMuted ? "Unmute" : "Mute"}
               >
                 {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
@@ -830,16 +797,16 @@ const Room = () => {
             )}
           </div>
 
-          {/* Quick instructions for uploading own file / github tracks */}
+          {/* Tip */}
           <div className="border border-gray-300 p-4 bg-gray-50 text-xs font-mono text-gray-600 space-y-1.5">
             <p className="font-bold text-black uppercase">🎧 Tip for your own music:</p>
             <p>You can add any MP3 link from GitHub, or upload your local test.mp3 file directly using the "Add Track" button.</p>
           </div>
         </div>
 
-        {/* Right Column: Shared Queue & Connected Listeners */}
+        {/* Right: Queue & Participants */}
         <div className="lg:col-span-5 space-y-6">
-          {/* Connected Jam Members */}
+          {/* Participants */}
           <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
             <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
               <div className="flex items-center gap-2">
@@ -882,12 +849,11 @@ const Room = () => {
             </div>
           </div>
 
-          {/* Shared Playlist Queue */}
+          {/* Queue */}
           <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
             <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
               <span className="font-bold text-xs uppercase tracking-wider">Shared Queue ({queue.length})</span>
               
-              {/* Add Song Modal Trigger */}
               <Dialog open={addSongOpen} onOpenChange={setAddSongOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm" className="bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold px-3 py-1">
@@ -901,7 +867,6 @@ const Room = () => {
                   </DialogHeader>
 
                   <div className="space-y-6 pt-2">
-                    {/* Method 1: Local MP3 file upload */}
                     <div className="p-4 border border-dashed border-black bg-gray-50 text-center space-y-2">
                       <Upload className="w-6 h-6 mx-auto text-black" />
                       <p className="text-xs font-semibold uppercase">Option 1: Upload your local MP3 file</p>
@@ -923,7 +888,6 @@ const Room = () => {
                       <div className="flex-grow border-t border-gray-300"></div>
                     </div>
 
-                    {/* Method 2: Online or GitHub URL */}
                     <form onSubmit={handleAddSong} className="space-y-3">
                       <div className="space-y-1">
                         <Label className="text-xs font-mono uppercase text-gray-700">Track Title</Label>
@@ -964,7 +928,6 @@ const Room = () => {
               </Dialog>
             </div>
 
-            {/* Queue List with Priority Reordering */}
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
               {queue.map((track, idx) => {
                 const isCurrent = idx === currentIndex;
@@ -980,13 +943,7 @@ const Room = () => {
                     <div
                       onClick={() => {
                         if (isHost) {
-                          setCurrentIndex(idx);
-                          broadcast({
-                            type: "PLAY",
-                            trackIndex: idx,
-                            seekTime: 0,
-                            timestamp: Date.now(),
-                          });
+                          playTrackAt(idx);
                         }
                       }}
                       className="min-w-0 flex-1 cursor-pointer"
@@ -999,7 +956,6 @@ const Room = () => {
                       </p>
                     </div>
 
-                    {/* Reorder & Remove Actions */}
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
@@ -1042,7 +998,7 @@ const Room = () => {
         </div>
       </main>
 
-      {/* Hidden Audio element controlling synchronization */}
+      {/* Audio Element */}
       <audio
         ref={audioRef}
         src={currentTrack?.url}
@@ -1059,7 +1015,6 @@ const Room = () => {
         onEnded={handleNext}
       />
 
-      {/* Bottom status strip */}
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
         Meoww &bull; Monochromatic Audio Streamer
       </footer>
