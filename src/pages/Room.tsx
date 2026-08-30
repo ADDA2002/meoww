@@ -53,7 +53,6 @@ const Room = () => {
   const [banned, setBanned] = useState<boolean>(false);
 
   // Playback state for UI display
-  // IMPORTANT: Members start PAUSED, host starts PAUSED
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
 
   // Refs for sync
@@ -64,9 +63,9 @@ const Room = () => {
   const isInitializedRef = useRef(false);
   const lastVetoToastRef = useRef<boolean | null>(null);
   const latestStateRef = useRef<FirebaseSyncState | null>(null);
-  
-  // Track if user has ever pressed play - used to prevent auto-play on join
-  const hasUserPressedPlayRef = useRef<boolean>(false);
+
+  // Track if we've synced at least once (for initial join)
+  const hasInitialSyncRef = useRef<boolean>(false);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -110,7 +109,6 @@ const Room = () => {
     if (isHost) {
       setTimeout(() => {
         playRef.current?.();
-        hasUserPressedPlayRef.current = true;
         // Sync the new track
         updatePlaybackStateRef.current?.({
           currentTrackIndex: nextIdx,
@@ -135,7 +133,7 @@ const Room = () => {
   setPlaybackRateRef.current = setPlaybackRate;
 
   // Handle state changes from Firebase - ELAPSED-TIME SYNC
-  // IMPORTANT: Only auto-play if user has explicitly pressed play (hasUserPressedPlayRef)
+  // IMPORTANT: Listeners ALWAYS follow host's playback state
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     console.log(`[Room] State change:`, state);
     latestStateRef.current = state;
@@ -173,25 +171,25 @@ const Room = () => {
       console.log(`[Room] Track change: ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
       
-      // If we have startEpoch and elapsed info, sync position but DON'T auto-play
+      // If we have startEpoch and elapsed info, sync position and playback state
       if (startEpoch !== null && serverElapsedMs !== null) {
         const seekTo = serverElapsedMs / 1000;
-        console.log(`[Room] Track change: seeking to ${seekTo.toFixed(2)}s (NOT auto-playing)`);
+        console.log(`[Room] Track change: seeking to ${seekTo.toFixed(2)}s, playing`);
         
         // Wait for the new track to load before seeking
         setTimeout(() => {
           seekRef.current(seekTo);
-          // DO NOT auto-play - just sync position
-          setIsPlaying(false);
+          // PLAY - listeners always follow host's playback state
+          playRef.current?.();
+          setIsPlaying(true);
         }, 200);
       } else {
-        // Paused state
+        // Paused state - PAUSE
         pauseRef.current?.();
         setIsPlaying(false);
       }
     } else if (startEpoch !== null && serverElapsedMs !== null) {
-      // Same track, startEpoch became set (play pressed by host)
-      // Only sync position, do NOT auto-play unless user has pressed play
+      // Same track, startEpoch became set (host pressed play)
       const seekTo = serverElapsedMs / 1000;
       const timeDiff = Math.abs(getCurrentTime() - seekTo);
       
@@ -200,18 +198,18 @@ const Room = () => {
         seekRef.current(seekTo);
       }
       
-      // Only auto-play if user has pressed play before
-      if (hasUserPressedPlayRef.current) {
-        playRef.current?.();
-        setIsPlaying(true);
-      }
+      // PLAY - listeners always follow host's playback state
+      playRef.current?.();
+      setIsPlaying(true);
     } else if (startEpoch === null) {
-      // Paused
-      pauseRef.current?.();
-      setIsPlaying(false);
+      // Paused - PAUSE (only if we were playing)
+      if (isPlaying) {
+        pauseRef.current?.();
+        setIsPlaying(false);
+      }
       setPlaybackRateRef.current?.(1.0); // Reset playback rate
     }
-  }, [isHost]);
+  }, [isHost, isPlaying]);
 
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
     console.log(`[Room] Received message:`, msg.type);
@@ -247,7 +245,6 @@ const Room = () => {
 
   const handleSessionEnded = useCallback(() => {
     console.log(`[Room] Session ended`);
-    hasUserPressedPlayRef.current = false;
     setSessionEnded(true);
   }, []);
 
@@ -283,13 +280,13 @@ const Room = () => {
   }, [updatePlaybackState, getServerTime]);
 
   // Load initial state when connected (for members joining mid-session)
-  // IMPORTANT: Only sync position, NEVER auto-play
+  // IMPORTANT: Sync position and playback state from host
   useEffect(() => {
     if (!isConnected || !myId || isHost || isInitializedRef.current) return;
     isInitializedRef.current = true;
 
     const loadInitialState = async () => {
-      console.log(`[Room] Loading initial state (no auto-play)...`);
+      console.log(`[Room] Loading initial state...`);
       
       try {
         const state = await getState();
@@ -309,17 +306,22 @@ const Room = () => {
             lastVetoToastRef.current = state.vetoActive;
           }
           
-          // If track is playing, sync position but DON'T play
+          // If track is playing, sync position AND play state
           if (state.startEpoch !== null && state.serverElapsedMs !== null) {
             const seekTo = state.serverElapsedMs / 1000;
-            console.log(`[Room] Joining mid-track: seeking to ${seekTo.toFixed(2)}s (NOT auto-playing)`);
+            console.log(`[Room] Joining mid-track: seeking to ${seekTo.toFixed(2)}s, playing`);
             setTimeout(() => {
               seekRef.current(seekTo);
-              // DO NOT auto-play - listener must press play themselves
-              setIsPlaying(false);
-              pauseRef.current?.();
+              playRef.current?.();
+              setIsPlaying(true);
+              hasInitialSyncRef.current = true;
             }, 300);
+          } else {
+            // Track is paused
+            hasInitialSyncRef.current = true;
           }
+        } else {
+          hasInitialSyncRef.current = true;
         }
         
         const userList = await getUsers();
@@ -328,6 +330,7 @@ const Room = () => {
         }
       } catch (err) {
         console.error(`[Room] Error loading initial state:`, err);
+        hasInitialSyncRef.current = true;
       }
     };
 
@@ -343,8 +346,8 @@ const Room = () => {
     if (isHost || !isConnected) return;
     
     const driftCheckInterval = setInterval(() => {
-      // Only correct drift if user has pressed play
-      if (!hasUserPressedPlayRef.current) return;
+      // Only correct drift if we're currently playing
+      if (!isPlaying) return;
       
       const state = latestStateRef.current;
       if (!state) return;
@@ -377,15 +380,13 @@ const Room = () => {
     }, 2000);
     
     return () => clearInterval(driftCheckInterval);
-  }, [isHost, isConnected, getCurrentTime, getAudioElement]);
+  }, [isHost, isConnected, isPlaying, getCurrentTime, getAudioElement]);
 
   const handleTogglePlay = useCallback(() => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
       return;
     }
-
-    hasUserPressedPlayRef.current = true;
 
     if (isPlaying) {
       pauseRef.current?.();
@@ -427,8 +428,6 @@ const Room = () => {
     }
     if (queueRef.current.length === 0) return;
     
-    hasUserPressedPlayRef.current = true;
-    
     const nextIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
@@ -458,8 +457,6 @@ const Room = () => {
     }
     if (queueRef.current.length === 0) return;
     
-    hasUserPressedPlayRef.current = true;
-    
     const prevIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
@@ -488,7 +485,6 @@ const Room = () => {
       return;
     }
     setCurrentIndex(idx);
-    hasUserPressedPlayRef.current = true;
     
     setTimeout(() => {
       playRef.current?.();
