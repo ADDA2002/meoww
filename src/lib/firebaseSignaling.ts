@@ -26,11 +26,12 @@ class FirebaseSignaling {
   private myName: string;
   private isHost: boolean;
   private listeners: ((msg: SyncMessage) => void)[] = [];
-  private stateListener: ((state: FirebaseSyncState) => void)[] = [];
+  private stateListeners: ((state: FirebaseSyncState) => void)[] = [];
   private connectionStateListener: ((connected: boolean) => void)[] = [];
   private userRef: any = null;
   private stateRef: any = null;
   private connected: boolean = false;
+  private initialStateReceived: boolean = false;
 
   constructor(roomCode: string, myId: string, myName: string, isHost: boolean) {
     this.roomCode = roomCode.toLowerCase();
@@ -97,8 +98,15 @@ class FirebaseSignaling {
           onValue(this.stateRef, (snapshot: any) => {
             const state = snapshot.val();
             console.log(`[FirebaseSignaling] 🔔 onValue state fired:`, state ? "exists" : "null");
+            
+            // Track if this is the initial state
+            const isInitial = !this.initialStateReceived;
+            if (isInitial) {
+              this.initialStateReceived = true;
+            }
+            
             if (state) {
-              this.notifyStateChange(state);
+              this.notifyStateChange(state, isInitial);
             }
           });
 
@@ -223,7 +231,7 @@ class FirebaseSignaling {
   }
 
   onStateChange(callback: (state: FirebaseSyncState) => void) {
-    this.stateListener.push(callback);
+    this.stateListeners.push(callback);
   }
 
   onConnectionChange(callback: (connected: boolean) => void) {
@@ -238,8 +246,8 @@ class FirebaseSignaling {
     });
   }
 
-  private notifyStateChange(state: FirebaseSyncState) {
-    this.stateListener.forEach(cb => cb(state));
+  private notifyStateChange(state: FirebaseSyncState, isInitial: boolean = false) {
+    this.stateListeners.forEach(cb => cb(state));
   }
 
   private notifyConnectionState(connected: boolean) {
