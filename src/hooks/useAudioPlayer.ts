@@ -5,15 +5,19 @@ interface UseAudioPlayerOptions {
   track: Track | null;
   isHost: boolean;
   onTimeUpdate?: (time: number) => void;
+  onTrackEnded?: () => void;
 }
 
-export function useAudioPlayer({ track, isHost, onTimeUpdate }: UseAudioPlayerOptions) {
+export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: UseAudioPlayerOptions) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
+
+  const onTrackEndedRef = useRef(onTrackEnded);
+  onTrackEndedRef.current = onTrackEnded;
 
   // Initialize audio element once
   useEffect(() => {
@@ -46,6 +50,11 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate }: UseAudioPlayerOp
 
     audio.addEventListener("play", () => {
       setIsPlaying(true);
+    });
+
+    audio.addEventListener("ended", () => {
+      setIsPlaying(false);
+      onTrackEndedRef.current?.();
     });
 
     audio.addEventListener("error", (e) => {

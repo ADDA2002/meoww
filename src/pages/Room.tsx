@@ -40,11 +40,27 @@ const Room = () => {
   // Sync refs
   const isHostRef = useRef(isHost);
   const currentIndexRef = useRef(currentIndex);
+  const queueRef = useRef(queue);
+  const isShuffleRef = useRef(isShuffle);
 
   isHostRef.current = isHost;
   currentIndexRef.current = currentIndex;
+  queueRef.current = queue;
+  isShuffleRef.current = isShuffle;
 
   const currentTrack = queue[currentIndex] || null;
+
+  // Handle track end - advance to next track (host only)
+  const handleTrackEnded = useCallback(() => {
+    if (!isHostRef.current) return;
+    if (queueRef.current.length === 0) return;
+
+    const nextIdx = isShuffleRef.current
+      ? Math.floor(Math.random() * queueRef.current.length)
+      : (currentIndexRef.current + 1) % queueRef.current.length;
+
+    setCurrentIndex(nextIdx);
+  }, []);
 
   // Audio player hook
   const {
@@ -62,7 +78,18 @@ const Room = () => {
     track: currentTrack,
     isHost,
     onTimeUpdate: () => {},
+    onTrackEnded: handleTrackEnded,
   });
+
+  // Auto-play when track changes (for host auto-advance)
+  useEffect(() => {
+    if (!isHost || !currentTrack) return;
+    
+    // Try to play whenever currentIndex changes
+    play().catch((err) => {
+      console.warn("Auto-play after track change failed:", err);
+    });
+  }, [currentIndex, isHost, currentTrack, play]);
 
   // Handle sync messages
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
