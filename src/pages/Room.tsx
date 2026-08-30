@@ -32,7 +32,6 @@ import {
 import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
-import { AudioSyncEngine } from "@/lib/syncEngine";
 import RoomDrawer from "@/components/RoomDrawer";
 
 const Room = () => {
@@ -67,7 +66,6 @@ const Room = () => {
 
   // ============= REFS =============
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const syncEngineRef = useRef<AudioSyncEngine | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   
@@ -77,7 +75,6 @@ const Room = () => {
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
   const isPlayingRef = useRef<boolean>(isPlaying);
-  const driftCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => { usersRef.current = users; }, [users]);
@@ -89,13 +86,6 @@ const Room = () => {
   const currentTrack = queue[currentIndex] || null;
 
   // ============= EFFECTS =============
-
-  // Initialize sync engine when audio is ready
-  useEffect(() => {
-    if (audioRef.current && !syncEngineRef.current) {
-      syncEngineRef.current = new AudioSyncEngine(audioRef.current);
-    }
-  }, []);
 
   // Sync mute state
   useEffect(() => {
@@ -145,32 +135,6 @@ const Room = () => {
     return () => {
       clearTimeout(initialTimer);
       clearInterval(interval);
-    };
-  }, [isHost, roomCode, myId]);
-
-  // Aggressive drift correction for listeners
-  useEffect(() => {
-    if (isHost) return;
-
-    // Continuously check if we're drifting from the host
-    driftCheckIntervalRef.current = setInterval(() => {
-      const audio = audioRef.current;
-      const engine = syncEngineRef.current;
-      if (!audio || !engine || !isPlayingRef.current) return;
-
-      // Request sync from host
-      const hostConn = connectionsRef.current.get(`meoww-room-${roomCode.toLowerCase()}`);
-      if (hostConn && hostConn.open) {
-        try {
-          hostConn.send({ type: "PING_SYNC", requesterId: myId });
-        } catch (e) { /* noop */ }
-      }
-    }, 2000); // Check every 2 seconds
-
-    return () => {
-      if (driftCheckIntervalRef.current) {
-        clearInterval(driftCheckIntervalRef.current);
-      }
     };
   }, [isHost, roomCode, myId]);
 
@@ -258,11 +222,64 @@ const Room = () => {
     return baseName + " " + Date.now();
   };
 
-  // ============= HOST ACTIONS - Send with precise timing =============
+  // ============= AUDIO PLAYBACK (CORE SYNC LOGIC) =============
+  
+  /**
+   * Plays audio at a specific target time with proper sync.
+   * This is the main function used by both host actions and listener sync.
+   * 
+   * @param targetTime - The exact time in seconds to seek to
+   * @param trackIndex - Which track to play (optional, for track changes)
+   */
+  const playAudioAt = useCallback((targetTime: number, trackIndex?: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // If we're changing to a different track
+    if (trackIndex !== undefined && trackIndex !== currentIndexRef.current) {
+      // Update state will trigger re-render which updates audio.src
+      setCurrentIndex(trackIndex);
+    }
+
+    // Wait for audio to be ready, then seek and play
+    const playWhenReady = () => {
+      // Remove this listener
+      audio.removeEventListener('canplay', playWhenReady);
+      
+      // Calculate how far we need to seek
+      const currentPos = audio.currentTime;
+      const drift = targetTime - currentPos;
+      
+      // Only seek if drift is significant (> 50ms)
+      if (Math.abs(drift) > 0.05) {
+        audio.currentTime = targetTime;
+      }
+      
+      // Play and update state
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch((e) => {
+        console.log("Play blocked:", e);
+      });
+    };
+
+    // Check if audio is already ready to play
+    if (audio.readyState >= 3) { // HAVE_FUTURE_DATA
+      playWhenReady();
+    } else {
+      // Wait for canplay event
+      audio.addEventListener('canplay', playWhenReady);
+      audio.load();
+    }
+  }, []); // No dependencies - this function uses refs
+
+  // ============= PLAYBACK CONTROLS (HOST ACTIONS) =============
 
   const handleTogglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
+
+    const now = Date.now();
 
     if (isPlayingRef.current) {
       // PAUSE
@@ -272,10 +289,9 @@ const Room = () => {
       broadcast({
         type: "PAUSE",
         seekTime: audio.currentTime,
-        timestamp: Date.now(),
       });
     } else {
-      // PLAY
+      // PLAY - play at current position immediately
       audio.play().then(() => {
         setIsPlaying(true);
         
@@ -305,6 +321,7 @@ const Room = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
+    // Play new track from beginning, broadcast to listeners
     const playWhenReady = () => {
       audio.removeEventListener('canplay', playWhenReady);
       audio.currentTime = 0;
@@ -323,6 +340,7 @@ const Room = () => {
 
     setCurrentIndex(nextIdx);
 
+    // Wait for new audio source to be ready
     if (audio.readyState >= 3) {
       playWhenReady();
     } else {
@@ -393,45 +411,67 @@ const Room = () => {
     });
   };
 
-  // ============= LISTENER SYNC - Aggressive compensation =============
+  // ============= SYNC HANDLERS (LISTENER RECEIVES) =============
 
-  const handleSyncPlay = async (msg: { trackIndex: number; seekTime: number; timestamp: number }) => {
+  const handleSyncPlay = (msg: { trackIndex: number; seekTime: number; timestamp: number }) => {
     const audio = audioRef.current;
-    const engine = syncEngineRef.current;
-    if (!audio || !engine) return;
+    if (!audio) return;
 
-    // If track changed, update state first
+    // Calculate exact time accounting for network latency
+    // This is the key to millisecond sync:
+    // - msg.seekTime is where the audio WAS on host's machine
+    // - msg.timestamp is when host sent this message
+    // - We calculate how much time passed since then and add to seekTime
+    const elapsedMs = Date.now() - msg.timestamp;
+    const targetTime = msg.seekTime + (elapsedMs / 1000);
+
+    // If track changed, update state (this updates audio.src)
     if (msg.trackIndex !== currentIndexRef.current) {
       setCurrentIndex(msg.trackIndex);
-      // Wait a bit for new audio src to load
-      await new Promise(r => setTimeout(r, 100));
     }
 
-    // Use sync engine to play with full latency compensation
-    try {
-      await engine.playWithSync(msg.timestamp, msg.seekTime);
-      setIsPlaying(true);
-    } catch (e) {
-      console.error("Sync play failed:", e);
+    // Wait for audio to be ready, then seek to exact time and play
+    const playWhenReady = () => {
+      audio.removeEventListener('canplay', playWhenReady);
+      
+      // Seek to exact calculated time
+      audio.currentTime = targetTime;
+      
+      // Play
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch((e) => {
+        console.log("Auto-play blocked:", e);
+      });
+    };
+
+    if (audio.readyState >= 3) {
+      playWhenReady();
+    } else {
+      audio.addEventListener('canplay', playWhenReady);
+      audio.load();
     }
   };
 
-  const handleSyncPause = (msg: { seekTime: number; timestamp: number }) => {
+  const handleSyncPause = (msg: { seekTime: number }) => {
     const audio = audioRef.current;
-    const engine = syncEngineRef.current;
-    if (!audio || !engine) return;
+    if (!audio) return;
 
-    engine.pauseWithSync(msg.timestamp, msg.seekTime);
+    audio.pause();
+    audio.currentTime = msg.seekTime;
     setIsPlaying(false);
   };
 
-  const handleSyncSeek = async (msg: { seekTime: number; timestamp: number }) => {
+  const handleSyncSeek = (msg: { seekTime: number; timestamp: number }) => {
     const audio = audioRef.current;
-    const engine = syncEngineRef.current;
-    if (!audio || !engine) return;
+    if (!audio) return;
 
-    await engine.seekWithSync(msg.timestamp, msg.seekTime);
-    setCurrentTime(engine.getSyncedCurrentTime());
+    // Apply same latency compensation for seeks
+    const elapsedMs = Date.now() - msg.timestamp;
+    const targetTime = msg.seekTime + (elapsedMs / 1000);
+    
+    audio.currentTime = targetTime;
+    setCurrentTime(targetTime);
   };
 
   // ============= CONNECTION HANDLING =============
@@ -553,25 +593,6 @@ const Room = () => {
 
       case "SEEK": {
         handleSyncSeek(msg);
-        break;
-      }
-
-      case "PING_SYNC": {
-        // Host responds with current state for drift correction
-        if (isHostRef.current) {
-          const audio = audioRef.current;
-          if (audio) {
-            const conn = connectionsRef.current.get(senderPeerId);
-            if (conn && conn.open) {
-              conn.send({
-                type: "PLAY",
-                trackIndex: currentIndexRef.current,
-                seekTime: audio.currentTime,
-                timestamp: Date.now(),
-              });
-            }
-          }
-        }
         break;
       }
 
