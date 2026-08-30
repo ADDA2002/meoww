@@ -69,6 +69,12 @@ const Room = () => {
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   
+  // ============= AudioContext for sub-millisecond timing precision =============
+  // AudioContext.currentTime uses the hardware audio clock which is much more
+  // accurate than performance.now() (microsecond vs millisecond resolution).
+  // This is the foundation for our sync improvements.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  
   // Refs that track state for use in closures
   const usersRef = useRef<RoomUser[]>([]);
   const queueRef = useRef<Track[]>(queue);
@@ -86,6 +92,30 @@ const Room = () => {
   const currentTrack = queue[currentIndex] || null;
 
   // ============= EFFECTS =============
+
+  // Initialize AudioContext on first user interaction (browser autoplay policy)
+  useEffect(() => {
+    const initAudioContext = () => {
+      if (!audioCtxRef.current) {
+        const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtor) {
+          audioCtxRef.current = new AudioCtor();
+          console.log("[AudioContext] Initialized. Sample rate:", audioCtxRef.current.sampleRate, "Hz");
+          console.log("[AudioContext] Initial currentTime:", audioCtxRef.current.currentTime, "s");
+        }
+      } else if (audioCtxRef.current.state === "suspended") {
+        audioCtxRef.current.resume();
+      }
+    };
+
+    // AudioContext must be created or resumed after a user gesture
+    const events = ["click", "keydown", "touchstart"];
+    events.forEach(evt => document.addEventListener(evt, initAudioContext, { once: true }));
+    
+    return () => {
+      events.forEach(evt => document.removeEventListener(evt, initAudioContext));
+    };
+  }, []);
 
   // Sync mute state
   useEffect(() => {
