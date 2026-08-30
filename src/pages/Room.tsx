@@ -320,9 +320,9 @@ const Room = () => {
           <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs font-mono text-green-600">
-            <Wifi className="w-3.5 h-3.5" />
-            <span>CONNECTED</span>
+          <div className="flex items-center gap-2 text-xs font-mono font-semibold text-gray-700 uppercase">
+            <span className="w-1.5 h-1.5 bg-black"></span>
+            <span>{isHost ? "Hosting" : "Synced"}</span>
           </div>
           <RoomDrawer 
             roomCode={roomCode} 
@@ -342,15 +342,6 @@ const Room = () => {
 
       <main className="flex-1 p-4 max-w-lg mx-auto w-full">
         <div className="w-full">
-          <div className="flex items-center justify-center mb-3 pb-2 border-b border-gray-200 text-xs font-mono">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-black animate-pulse"></span>
-              <span className="font-semibold text-gray-700 uppercase">
-                {isHost ? "YOU ARE HOST" : "SYNCED WITH HOST"}
-              </span>
-            </div>
-          </div>
-
           <div className="w-full aspect-square bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
             {currentTrack?.cover ? (
               <img src={currentTrack.cover} alt="Cover" className="w-full h-full object-cover grayscale" />
