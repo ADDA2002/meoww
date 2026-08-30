@@ -340,7 +340,7 @@ const Room = () => {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col p-4 max-w-lg mx-auto w-full">
+      <main className="flex-1 p-4 max-w-lg mx-auto w-full">
         <div className="w-full">
           <div className="flex items-center justify-center mb-3 pb-2 border-b border-gray-200 text-xs font-mono">
             <div className="flex items-center gap-2">
@@ -351,11 +351,11 @@ const Room = () => {
             </div>
           </div>
 
-          <div className="w-32 h-32 mx-auto bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
+          <div className="w-full aspect-square bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
             {currentTrack?.cover ? (
               <img src={currentTrack.cover} alt="Cover" className="w-full h-full object-cover grayscale" />
             ) : (
-              <Music className="w-12 h-12 text-gray-400" />
+              <Music className="w-24 h-24 text-gray-400" />
             )}
           </div>
 
