@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Track, RoomUser, SyncMessage } from "@/types/music";
-import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 
@@ -38,9 +37,6 @@ const Room = () => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
 
-  // Track if we've received the initial state (for avoiding auto-play on first load)
-  const hasReceivedInitialState = useRef(false);
-
   // Sync refs
   const isHostRef = useRef(isHost);
   const currentIndexRef = useRef(currentIndex);
@@ -53,6 +49,18 @@ const Room = () => {
   isShuffleRef.current = isShuffle;
 
   const currentTrack = queue[currentIndex] || null;
+
+  // Handle track end - advance to next track (host only)
+  const handleTrackEnded = useCallback(() => {
+    if (!isHostRef.current) return;
+    if (queueRef.current.length === 0) return;
+
+    const nextIdx = isShuffleRef.current
+      ? Math.floor(Math.random() * queueRef.current.length)
+      : (currentIndexRef.current + 1) % queueRef.current.length;
+
+    setCurrentIndex(nextIdx);
+  }, []);
 
   // Audio player hook
   const {
@@ -70,27 +78,18 @@ const Room = () => {
     track: currentTrack,
     isHost,
     onTimeUpdate: () => {},
-    onTrackEnded: () => {
-      // Handle track end - advance to next track (host only)
-      if (!isHostRef.current) return;
-      if (queueRef.current.length === 0) return;
-
-      const nextIdx = isShuffleRef.current
-        ? Math.floor(Math.random() * queueRef.current.length)
-        : (currentIndexRef.current + 1) % queueRef.current.length;
-
-      setCurrentIndex(nextIdx);
-    },
+    onTrackEnded: handleTrackEnded,
   });
 
-  // Playback refs for callbacks
-  const playRef = useRef(play);
-  const pauseRef = useRef(pause);
-  const seekRef = useRef(seek);
-
-  playRef.current = play;
-  pauseRef.current = pause;
-  seekRef.current = seek;
+  // Auto-play when track changes (for host auto-advance)
+  useEffect(() => {
+    if (!isHost || !currentTrack) return;
+    
+    // Try to play whenever currentIndex changes
+    play().catch((err) => {
+      console.warn("Auto-play after track change failed:", err);
+    });
+  }, [currentIndex, isHost, currentTrack, play]);
 
   // Handle sync messages
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
@@ -105,22 +104,22 @@ const Room = () => {
           }
           const latency = (Date.now() - msg.timestamp) / 1000;
           const targetTime = msg.seekTime + latency;
-          seekRef.current(targetTime);
-          playRef.current();
+          seek(targetTime);
+          play();
         }
         break;
       }
       case "PAUSE": {
         if (!isHostRef.current) {
-          seekRef.current(msg.seekTime);
-          pauseRef.current();
+          seek(msg.seekTime);
+          pause();
         }
         break;
       }
       case "SEEK": {
         if (!isHostRef.current) {
           const latency = (Date.now() - msg.timestamp) / 1000;
-          seekRef.current(msg.seekTime + latency);
+          seek(msg.seekTime + latency);
         }
         break;
       }
@@ -142,60 +141,7 @@ const Room = () => {
         break;
       }
     }
-  }, [myId]);
-
-  // Handle Firebase state changes (for syncing when member joins while host is playing)
-  const handleFirebaseStateChange = useCallback((state: FirebaseSyncState) => {
-    if (!state) return;
-
-    // If this is the first state update (member just joined)
-    if (!hasReceivedInitialState.current) {
-      hasReceivedInitialState.current = true;
-      
-      // Update queue from state
-      if (state.queue && state.queue.length > 0) {
-        setQueue(state.queue);
-      }
-      
-      // Update track index
-      if (state.currentTrackIndex !== undefined) {
-        setCurrentIndex(state.currentTrackIndex);
-      }
-      
-      // If host was playing when member joined, sync and play
-      if (state.isPlaying && !isHostRef.current) {
-        // Wait for audio to be ready before playing
-        let attempts = 0;
-        const maxAttempts = 50;
-        
-        const tryPlay = () => {
-          if (isLoaded) {
-            const latency = state.timestamp ? (Date.now() - state.timestamp) / 1000 : 0;
-            const targetTime = Math.max(0, (state.currentTime || 0) + latency);
-            seekRef.current(targetTime);
-            playRef.current();
-          } else if (attempts < maxAttempts) {
-            attempts++;
-            setTimeout(tryPlay, 100);
-          }
-        };
-        
-        tryPlay();
-      }
-      
-      return;
-    }
-    
-    // Subsequent state updates (host changed something)
-    // Only update queue/track index, don't auto-play
-    if (state.queue && state.queue.length > 0) {
-      setQueue(state.queue);
-    }
-    
-    if (state.currentTrackIndex !== undefined) {
-      setCurrentIndex(state.currentTrackIndex);
-    }
-  }, [isLoaded]);
+  }, [myId, play, pause, seek]);
 
   // Firebase sync hook
   const { isConnected, broadcast, getUsers } = useFirebaseSync({
@@ -207,7 +153,6 @@ const Room = () => {
     currentIndex,
     isPlaying,
     onMessage: handleIncomingMessage,
-    onStateChange: handleFirebaseStateChange,
   });
 
   // Initialize connection
@@ -232,8 +177,15 @@ const Room = () => {
     });
   }, [isConnected, myId, getUsers]);
 
-  // Broadcast ref
+  // Playback controls - now using refs to avoid stale closures
+  const playRef = useRef(play);
+  const pauseRef = useRef(pause);
+  const seekRef = useRef(seek);
   const broadcastRef = useRef(broadcast);
+
+  playRef.current = play;
+  pauseRef.current = pause;
+  seekRef.current = seek;
   broadcastRef.current = broadcast;
 
   const handleTogglePlay = useCallback(() => {
@@ -258,10 +210,14 @@ const Room = () => {
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex + 1) % queue.length;
 
+    // Update index first (this triggers audio element to load new track)
     setCurrentIndex(nextIdx);
+    
+    // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
+    // Play when ready
     setTimeout(() => {
       seekRef.current(0);
       playRef.current();
@@ -276,10 +232,14 @@ const Room = () => {
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex - 1 + queue.length) % queue.length;
 
+    // Update index first
     setCurrentIndex(prevIdx);
+    
+    // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
+    // Play when ready
     setTimeout(() => {
       seekRef.current(0);
       playRef.current();
@@ -290,10 +250,14 @@ const Room = () => {
   const handleTrackClick = useCallback((idx: number) => {
     if (!isHost) return;
 
+    // Update index first
     setCurrentIndex(idx);
+    
+    // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
+    // Play when ready
     setTimeout(() => {
       seekRef.current(0);
       playRef.current();

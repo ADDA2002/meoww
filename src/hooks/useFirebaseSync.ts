@@ -11,7 +11,6 @@ interface UseFirebaseSyncOptions {
   currentIndex: number;
   isPlaying: boolean;
   onMessage: (msg: SyncMessage) => void;
-  onStateChange?: (state: FirebaseSyncState) => void;
 }
 
 export function useFirebaseSync({
@@ -23,7 +22,6 @@ export function useFirebaseSync({
   currentIndex,
   isPlaying,
   onMessage,
-  onStateChange,
 }: UseFirebaseSyncOptions) {
   const signalingRef = useRef<FirebaseSignaling | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -43,11 +41,6 @@ export function useFirebaseSync({
 
     signaling.onMessage(onMessage);
     signaling.onConnectionChange(setIsConnected);
-
-    // Subscribe to state changes for syncing when member joins
-    if (onStateChange) {
-      signaling.onStateChange(onStateChange);
-    }
 
     signaling.connect();
 
