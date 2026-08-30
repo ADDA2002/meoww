@@ -1,4 +1,3 @@
-0.5s">
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -59,7 +58,7 @@ const Room = () => {
   const isInitializedRef = useRef(false);
   const isPlayingRef = useRef(false);
   const lastVetoToastRef = useRef<boolean | null>(null);
-  const lastSyncTimeRef = useRef<number>(0); // Track last sync time to prevent spam
+  const lastSyncTimeRef = useRef<number>(0);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -67,11 +66,8 @@ const Room = () => {
   vetoActiveRef.current = vetoActive;
 
   const currentTrack = queue[currentIndex] || null;
-
-  // Convenience: non-host members are "locked" when veto is on
   const controlsLocked = !isHost && vetoActive;
 
-  // Handle track end - advance to next track
   const handleTrackEnded = useCallback(() => {
     if (queueRef.current.length === 0) return;
     isPlayingRef.current = false;
@@ -81,14 +77,11 @@ const Room = () => {
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
     setCurrentIndex(nextIdx);
-    
-    // Auto-advance: play next track automatically
     setTimeout(() => {
       playRef.current?.();
     }, 100);
   }, []);
 
-  // Audio player hook
   const {
     isPlaying,
     isMuted,
@@ -99,7 +92,7 @@ const Room = () => {
     pause,
     seek,
     getCurrentTime,
-    audioRef, // NEW: Get audio ref for live time checks
+    audioRef,
   } = useAudioPlayer({
     track: currentTrack,
     isHost,
@@ -109,11 +102,9 @@ const Room = () => {
 
   isPlayingRef.current = isPlaying;
 
-  // Keep play/pause refs updated
   const playRef = useRef(play);
   const pauseRef = useRef(pause);
   const seekRef = useRef(seek);
-  const broadcastRef = useRef<((msg: SyncMessage) => void) | null>(null);
   const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
   const getCurrentTimeRef = useRef(getCurrentTime);
 
@@ -122,11 +113,8 @@ const Room = () => {
   seekRef.current = seek;
   getCurrentTimeRef.current = getCurrentTime;
 
-  // Handle state changes from Firebase (PRIMARY sync for playback)
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     console.log(`[Room] State change:`, state);
-    
-    // Only non-host members should follow host's state
     if (isHost) return;
     
     const newIndex = state.currentTrackIndex ?? 0;
@@ -135,16 +123,13 @@ const Room = () => {
     const newQueue = state.queue || [];
     const newVetoActive = state.vetoActive ?? true;
     
-    // Update queue if different
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
       console.log(`[Room] Updating queue from state: ${newQueue.length} tracks`);
       setQueue(newQueue);
     }
     
-    // Handle veto state change - show toast ONLY when it changes
     if (newVetoActive !== vetoActiveRef.current) {
       setVetoActive(newVetoActive);
-      // Only show toast if this is coming from host (not initial load)
       if (lastVetoToastRef.current !== null) {
         if (newVetoActive) {
           toast("Host restricted controls. You can add songs only.", { icon: "🔒" });
@@ -155,15 +140,12 @@ const Room = () => {
       lastVetoToastRef.current = newVetoActive;
     }
     
-    // Handle track change
     if (newIndex !== currentIndexRef.current) {
       console.log(`[Room] Track change: ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
     }
     
-    // Handle play/pause state
     if (newIsPlaying) {
-      // Only seek+play if not already playing or if significantly out of sync (>threshold)
       const timeDiff = Math.abs(getCurrentTimeRef.current() - newTime);
       console.log(`[Room] Sync check: current=${getCurrentTimeRef.current()}, host=${newTime}, diff=${timeDiff}`);
       
@@ -185,18 +167,14 @@ const Room = () => {
     }
   }, [isHost]);
 
-  // Auto-resync check: Periodically check if we've drifted too far from host (for members only)
+  // Auto-resync check for members
   useEffect(() => {
     if (isHost || !isConnected) return;
     
     const checkInterval = setInterval(() => {
       const state = latestStateRef.current;
       if (!state) return;
-      
-      // Only check if we're supposed to be playing
       if (!state.isPlaying || !isPlayingRef.current) return;
-      
-      // Don't check too frequently (within 2 seconds of last sync)
       if (Date.now() - lastSyncTimeRef.current < 2000) return;
       
       const hostTime = state.currentTime;
@@ -208,30 +186,18 @@ const Room = () => {
         seekRef.current(hostTime);
         lastSyncTimeRef.current = Date.now();
       }
-    }, 1000); // Check every second
+    }, 1000);
     
     return () => clearInterval(checkInterval);
   }, [isHost, isConnected]);
 
-  // Store latest state for auto-resync check
   const latestStateRef = useRef<FirebaseSyncState | null>(null);
-  const handleStateChangeRef = useRef(handleStateChange);
-  
-  // Update the ref when handleStateChange changes
-  useEffect(() => {
-    handleStateChangeRef.current = (state: FirebaseSyncState) => {
-      latestStateRef.current = state;
-      handleStateChange(state);
-    };
-  }, [handleStateChange]);
 
-  // Override handleStateChange to also store latest state
   const handleStateChangeWithStore = useCallback((state: FirebaseSyncState) => {
     latestStateRef.current = state;
     handleStateChange(state);
   }, [handleStateChange]);
 
-  // Handle instant messages (kick, ban)
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
     console.log(`[Room] Received message:`, msg.type);
     
@@ -239,7 +205,6 @@ const Room = () => {
       case "USER_LIST":
         setUsers(msg.users);
         break;
-        
       case "KICK_USER": {
         if (msg.targetId === myId) {
           setKicked(true);
@@ -250,7 +215,6 @@ const Room = () => {
         }
         break;
       }
-      
       case "BAN_USER": {
         if (msg.targetId === myId) {
           setBanned(true);
@@ -264,14 +228,12 @@ const Room = () => {
     }
   }, [myId]);
 
-  // Handle session ended
   const handleSessionEnded = useCallback(() => {
     console.log(`[Room] Session ended`);
     setSessionEnded(true);
   }, []);
 
-  // Firebase sync hook - use the wrapper that stores state
-  const { isConnected, broadcast, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
+  const { isConnected, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
     roomCode,
     myId,
     userName,
@@ -284,50 +246,39 @@ const Room = () => {
     onSessionEnded: handleSessionEnded,
   });
 
-  // Store refs
   useEffect(() => {
-    broadcastRef.current = broadcast;
     updatePlaybackStateRef.current = updatePlaybackState;
-  }, [broadcast, updatePlaybackState]);
+  }, [updatePlaybackState]);
 
-  // Initialize connection
   useEffect(() => {
     if (!roomCode) return;
-
     const generatedId = isHost
       ? `host-${roomCode.toLowerCase()}`
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
-    
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
-  // Load initial state when connected (for members joining mid-session)
   useEffect(() => {
     if (!isConnected || !myId || isHost || isInitializedRef.current) return;
     isInitializedRef.current = true;
 
     const loadInitialState = async () => {
       console.log(`[Room] Loading initial state...`);
-      
       try {
         const state = await getState();
         if (state) {
           console.log(`[Room] Got initial state:`, state);
-          
           if (state.queue && state.queue.length > 0) {
             setQueue(state.queue);
           }
-          
           if (state.currentTrackIndex !== undefined) {
             setCurrentIndex(state.currentTrackIndex);
           }
-          
           if (state.vetoActive !== undefined) {
             setVetoActive(state.vetoActive);
             lastVetoToastRef.current = state.vetoActive;
           }
         }
-        
         const userList = await getUsers();
         if (userList.length > 0) {
           setUsers(userList);
@@ -336,7 +287,6 @@ const Room = () => {
         console.error(`[Room] Error loading initial state:`, err);
       }
     };
-
     loadInitialState();
   }, [isConnected, myId, isHost, getState, getUsers]);
 
@@ -345,7 +295,6 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-
     if (isPlayingRef.current) {
       pauseRef.current?.();
       const time = getCurrentTime();
@@ -376,7 +325,6 @@ const Room = () => {
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
     setCurrentIndex(nextIdx);
-    
     setTimeout(() => {
       playRef.current?.();
       updatePlaybackStateRef.current?.({
@@ -400,7 +348,6 @@ const Room = () => {
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
     setCurrentIndex(prevIdx);
-    
     setTimeout(() => {
       playRef.current?.();
       updatePlaybackStateRef.current?.({
@@ -417,9 +364,7 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-
     setCurrentIndex(idx);
-    
     setTimeout(() => {
       playRef.current?.();
       updatePlaybackStateRef.current?.({
@@ -450,10 +395,8 @@ const Room = () => {
       url: song.url,
       addedBy: userName,
     };
-
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
-    
     updatePlaybackStateRef.current?.({
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
@@ -471,10 +414,8 @@ const Room = () => {
       addedBy: userName,
       isLocalFile: true,
     };
-
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
-    
     updatePlaybackStateRef.current?.({
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
@@ -491,7 +432,6 @@ const Room = () => {
       toast.error("Only the host can reorder the queue.");
       return;
     }
-    
     if (direction === "up" && idx === 0) return;
     if (direction === "down" && idx === queueRef.current.length - 1) return;
 
@@ -505,7 +445,6 @@ const Room = () => {
 
     setQueue(newQueue);
     setCurrentIndex(newActive);
-    
     updatePlaybackStateRef.current?.({
       queue: newQueue,
       currentTrackIndex: newActive,
@@ -517,7 +456,6 @@ const Room = () => {
       toast.error("Only the host can remove tracks.");
       return;
     }
-    
     if (queueRef.current.length <= 1) {
       toast.error("Queue must have at least one track.");
       return;
@@ -529,7 +467,6 @@ const Room = () => {
     
     setQueue(newQueue);
     setCurrentIndex(newActive);
-    
     updatePlaybackStateRef.current?.({
       queue: newQueue,
       currentTrackIndex: newActive,
@@ -541,9 +478,7 @@ const Room = () => {
     const next = !vetoActiveRef.current;
     setVetoActive(next);
     vetoActiveRef.current = next;
-    
     toast.success(next ? "Member controls locked." : "Member controls restored.");
-    
     updatePlaybackStateRef.current?.({
       vetoActive: next,
     });
@@ -582,9 +517,7 @@ const Room = () => {
           </div>
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase">Session Ended</h1>
-            <p className="text-gray-600 font-mono text-sm">
-              The host has left the session.
-            </p>
+            <p className="text-gray-600 font-mono text-sm">The host has left the session.</p>
           </div>
           <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
@@ -603,9 +536,7 @@ const Room = () => {
           </div>
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase">You Have Been Kicked</h1>
-            <p className="text-gray-600 font-mono text-sm">
-              The host has removed you from this session.
-            </p>
+            <p className="text-gray-600 font-mono text-sm">The host has removed you from this session.</p>
           </div>
           <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
@@ -624,9 +555,7 @@ const Room = () => {
           </div>
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase text-red-600">You Have Been Banned</h1>
-            <p className="text-gray-600 font-mono text-sm">
-              The host has permanently banned you from this session.
-            </p>
+            <p className="text-gray-600 font-mono text-sm">The host has permanently banned you from this session.</p>
           </div>
           <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
@@ -703,12 +632,7 @@ const Room = () => {
         </div>
 
         <div className="lg:col-span-5 space-y-6">
-          <UserList
-            users={users}
-            myId={myId}
-            isHost={isHost}
-          />
-
+          <UserList users={users} myId={myId} isHost={isHost} />
           <QueueList
             queue={queue}
             currentIndex={currentIndex}
