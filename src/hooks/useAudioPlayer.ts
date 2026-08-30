@@ -96,6 +96,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     setCurrentTime(0);
     setDuration(0);
     setIsPlaying(false);
+    audio.playbackRate = 1.0; // Reset playback rate on track change
 
     audio.src = track.url;
     audio.load();
@@ -156,7 +157,14 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     return audioRef.current?.currentTime || 0;
   }, []);
 
-  // Get live audio element for external sync checks
+  // Set playback rate for drift correction
+  const setPlaybackRate = useCallback((rate: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = rate;
+  }, []);
+
+  // Get the live audio element for external sync checks
   const getAudioElement = useCallback(() => {
     return audioRef.current;
   }, []);
@@ -172,7 +180,8 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     pause,
     seek,
     getCurrentTime,
-    getAudioElement, // NEW: Expose audio element for sync
-    audioRef, // NEW: Expose audio ref directly
+    setPlaybackRate,
+    getAudioElement,
+    audioRef,
   };
 }

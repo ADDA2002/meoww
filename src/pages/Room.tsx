@@ -19,8 +19,10 @@ import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
-// Target-end-time sync: give buffer for slow devices to receive the message
-const SYNC_BUFFER_MS = 3000; // 3 second buffer - message must arrive this much before target end time
+// Drift threshold: if drift exceeds this, hard-seek instead of gentle nudge
+const DRIFT_HARD_THRESHOLD_SEC = 1.5;
+// Drift threshold: if drift exceeds this, nudge by adjusting playback rate
+const DRIFT_NUDGE_THRESHOLD_SEC = 0.3;
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -60,11 +62,9 @@ const Room = () => {
   const vetoActiveRef = useRef(vetoActive);
   const isInitializedRef = useRef(false);
   const lastVetoToastRef = useRef<boolean | null>(null);
-  
-  // NEW: Target-end-time sync refs
-  const scheduledStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduledEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestStateRef = useRef<FirebaseSyncState | null>(null);
+  // For member: we calculate when WE should have started based on host's startEpoch
+  const localStartEpochRef = useRef<number | null>(null);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -84,6 +84,8 @@ const Room = () => {
     pause,
     seek,
     getCurrentTime,
+    setPlaybackRate,
+    getAudioElement,
     audioRef,
   } = useAudioPlayer({
     track: currentTrack,
@@ -106,9 +108,11 @@ const Room = () => {
     if (isHost) {
       setTimeout(() => {
         playRef.current?.();
+        // Sync the new track
         updatePlaybackStateRef.current?.({
           currentTrackIndex: nextIdx,
-          targetEndTime: null,
+          startEpoch: null, // Will be set when play is called
+          serverElapsedMs: null,
           trackDuration: null,
         });
       }, 100);
@@ -119,75 +123,15 @@ const Room = () => {
   const pauseRef = useRef(pause);
   const seekRef = useRef(seek);
   const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
+  const getServerTimeRef = useRef<(() => number) | null>(null);
+  const setPlaybackRateRef = useRef<((rate: number) => void) | null>(null);
 
   playRef.current = play;
   pauseRef.current = pause;
   seekRef.current = seek;
+  setPlaybackRateRef.current = setPlaybackRate;
 
-  // Clear any scheduled playback timers
-  const clearScheduledTimers = useCallback(() => {
-    if (scheduledStartTimerRef.current) {
-      clearTimeout(scheduledStartTimerRef.current);
-      scheduledStartTimerRef.current = null;
-    }
-    if (scheduledEndTimerRef.current) {
-      clearTimeout(scheduledEndTimerRef.current);
-      scheduledEndTimerRef.current = null;
-    }
-  }, []);
-
-  // Calculate localStartTime from targetEndTime and duration
-  const calculateLocalStartTime = (targetEndTime: number, durationMs: number): number => {
-    return targetEndTime - durationMs;
-  };
-
-  // Schedule playback to start at localStartTime and end at targetEndTime
-  const schedulePlayback = useCallback((targetEndTime: number, durationMs: number) => {
-    clearScheduledTimers();
-    
-    const now = Date.now();
-    const localStartTime = calculateLocalStartTime(targetEndTime, durationMs);
-    const timeUntilStart = localStartTime - now;
-    
-    console.log(`[Room] Scheduling playback: targetEndTime=${targetEndTime}, durationMs=${durationMs}, localStartTime=${localStartTime}, now=${now}, timeUntilStart=${timeUntilStart}ms`);
-    
-    if (timeUntilStart <= 0) {
-      // We're already past the start time - play immediately
-      console.log(`[Room] Past start time, playing now`);
-      playRef.current?.();
-      setIsPlaying(true);
-      
-      // Schedule pause at target end time
-      const timeUntilEnd = targetEndTime - Date.now();
-      if (timeUntilEnd > 0) {
-        scheduledEndTimerRef.current = setTimeout(() => {
-          console.log(`[Room] Target end time reached, pausing`);
-          pauseRef.current?.();
-          setIsPlaying(false);
-        }, timeUntilEnd);
-      }
-    } else {
-      // Schedule start
-      scheduledStartTimerRef.current = setTimeout(() => {
-        console.log(`[Room] Scheduled start time reached, playing`);
-        playRef.current?.();
-        setIsPlaying(true);
-        
-        // Schedule pause at target end time
-        const actualEndTime = targetEndTime;
-        const timeUntilEnd = actualEndTime - Date.now();
-        if (timeUntilEnd > 0) {
-          scheduledEndTimerRef.current = setTimeout(() => {
-            console.log(`[Room] Target end time reached, pausing`);
-            pauseRef.current?.();
-            setIsPlaying(false);
-          }, timeUntilEnd);
-        }
-      }, timeUntilStart);
-    }
-  }, [clearScheduledTimers]);
-
-  // Handle state changes from Firebase - TARGET END TIME SYNC
+  // Handle state changes from Firebase - ELAPSED-TIME SYNC
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     console.log(`[Room] State change:`, state);
     latestStateRef.current = state;
@@ -198,7 +142,8 @@ const Room = () => {
     const newIndex = state.currentTrackIndex ?? 0;
     const newQueue = state.queue || [];
     const newVetoActive = state.vetoActive ?? true;
-    const targetEndTime = state.targetEndTime;
+    const startEpoch = state.startEpoch; // server time when track started
+    const serverElapsedMs = state.serverElapsedMs;
     const trackDuration = state.trackDuration;
     
     // Update queue if different
@@ -220,21 +165,51 @@ const Room = () => {
       lastVetoToastRef.current = newVetoActive;
     }
     
-    // Handle track change
+    // Handle track change OR startEpoch change
     if (newIndex !== currentIndexRef.current) {
       console.log(`[Room] Track change: ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
       
-      // If we have target end time info, schedule playback for the new track
-      if (targetEndTime !== null && trackDuration !== null) {
-        schedulePlayback(targetEndTime, trackDuration);
+      // If we have startEpoch and elapsed info, seek to correct position and start
+      if (startEpoch !== null && serverElapsedMs !== null) {
+        // localStartEpoch = serverStartEpoch - clockOffset
+        // Wait, no: serverStartEpoch is already in server time.
+        // We need to know what "now" was when host started the track.
+        // The simplest: serverElapsedMs tells us how much has passed since startEpoch.
+        // So we should seek to serverElapsedMs and play from there.
+        const seekTo = serverElapsedMs / 1000; // convert to seconds
+        console.log(`[Room] Track change: seeking to ${seekTo.toFixed(2)}s (serverElapsedMs=${serverElapsedMs})`);
+        
+        // Wait for the new track to load before seeking
+        setTimeout(() => {
+          seekRef.current(seekTo);
+          playRef.current?.();
+          setIsPlaying(true);
+        }, 200);
+      } else if (startEpoch === null) {
+        // Paused state
+        pauseRef.current?.();
+        setIsPlaying(false);
       }
-    } else if (targetEndTime !== null && trackDuration !== null) {
-      // Same track index but new timing info - reschedule
-      console.log(`[Room] Rescheduling playback for same track`);
-      schedulePlayback(targetEndTime, trackDuration);
+    } else if (startEpoch !== null && serverElapsedMs !== null) {
+      // Same track, but startEpoch became set (play pressed)
+      const seekTo = serverElapsedMs / 1000;
+      const timeDiff = Math.abs(getCurrentTime() - seekTo);
+      
+      if (timeDiff > DRIFT_HARD_THRESHOLD_SEC) {
+        // Major drift - hard seek
+        console.log(`[Room] Hard seek to ${seekTo.toFixed(2)}s (drift: ${timeDiff.toFixed(2)}s)`);
+        seekRef.current(seekTo);
+      }
+      playRef.current?.();
+      setIsPlaying(true);
+    } else if (startEpoch === null) {
+      // Paused
+      pauseRef.current?.();
+      setIsPlaying(false);
+      setPlaybackRateRef.current?.(1.0); // Reset playback rate
     }
-  }, [isHost, schedulePlayback]);
+  }, [isHost]);
 
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
     console.log(`[Room] Received message:`, msg.type);
@@ -270,9 +245,8 @@ const Room = () => {
 
   const handleSessionEnded = useCallback(() => {
     console.log(`[Room] Session ended`);
-    clearScheduledTimers();
     setSessionEnded(true);
-  }, [clearScheduledTimers]);
+  }, []);
 
   // Initialize connection
   useEffect(() => {
@@ -286,7 +260,7 @@ const Room = () => {
   }, [roomCode, isHost]);
 
   // Firebase sync hook
-  const { isConnected, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
+  const { isConnected, updatePlaybackState, kickUser, banUser, getUsers, getState, getServerTime, getClockOffset } = useFirebaseSync({
     roomCode,
     myId,
     userName,
@@ -299,10 +273,11 @@ const Room = () => {
     onSessionEnded: handleSessionEnded,
   });
 
-  // Store refs - AFTER useFirebaseSync
+  // Store refs
   useEffect(() => {
     updatePlaybackStateRef.current = updatePlaybackState;
-  }, [updatePlaybackState]);
+    getServerTimeRef.current = getServerTime;
+  }, [updatePlaybackState, getServerTime]);
 
   // Load initial state when connected (for members joining mid-session)
   useEffect(() => {
@@ -330,9 +305,15 @@ const Room = () => {
             lastVetoToastRef.current = state.vetoActive;
           }
           
-          // If there's active playback, schedule it
-          if (state.targetEndTime !== null && state.trackDuration !== null) {
-            schedulePlayback(state.targetEndTime, state.trackDuration);
+          // If track is playing, seek to correct position and play
+          if (state.startEpoch !== null && state.serverElapsedMs !== null) {
+            const seekTo = state.serverElapsedMs / 1000;
+            console.log(`[Room] Joining mid-track: seeking to ${seekTo.toFixed(2)}s`);
+            setTimeout(() => {
+              seekRef.current(seekTo);
+              playRef.current?.();
+              setIsPlaying(true);
+            }, 300);
           }
         }
         
@@ -346,33 +327,57 @@ const Room = () => {
     };
 
     loadInitialState();
-  }, [isConnected, myId, isHost, getState, getUsers, schedulePlayback]);
+  }, [isConnected, myId, isHost, getState, getUsers]);
 
-  // Calculate target end time from current position and broadcast to members
-  const calculateAndBroadcastTargetEndTime = useCallback(() => {
-    if (!isHost || !updatePlaybackStateRef.current) return;
+  // ============================
+  // DRIFT CORRECTION (MEMBERS)
+  // ============================
+  // Continuously compare our playback position vs server's expected position
+  // and apply gentle correction (playback rate) or hard correction (seek)
+  useEffect(() => {
+    if (isHost || !isConnected) return;
     
-    const audio = audioRef.current;
-    if (!audio || !currentTrack) return;
+    const driftCheckInterval = setInterval(() => {
+      const state = latestStateRef.current;
+      if (!state) return;
+      if (state.startEpoch === null || state.serverElapsedMs === null) return;
+      
+      // Calculate what our local time should be
+      // serverElapsedMs was the elapsed at the last state update.
+      // We need to add the time since the last update to get current elapsed.
+      const timeSinceUpdate = Date.now() - state.lastUpdated;
+      const expectedElapsedMs = state.serverElapsedMs + timeSinceUpdate;
+      const expectedElapsedSec = expectedElapsedMs / 1000;
+      
+      // Our current playback position
+      const myCurrentSec = getCurrentTime();
+      const drift = myCurrentSec - expectedElapsedSec;
+      
+      // Apply correction
+      if (Math.abs(drift) > DRIFT_HARD_THRESHOLD_SEC) {
+        // Hard seek: too far off
+        console.log(`[Room] HARD SEEK: drift=${drift.toFixed(2)}s, seeking to ${expectedElapsedSec.toFixed(2)}s`);
+        seekRef.current(expectedElapsedSec);
+        setPlaybackRateRef.current?.(1.0);
+      } else if (Math.abs(drift) > DRIFT_NUDGE_THRESHOLD_SEC) {
+        // Gentle nudge via playback rate
+        // If we're ahead (drift > 0), slow down slightly
+        // If we're behind (drift < 0), speed up slightly
+        // Proportional to drift
+        const correctionRate = 1.0 - (drift * 0.05); // gentle 5% per second of drift
+        const clampedRate = Math.max(0.95, Math.min(1.05, correctionRate));
+        setPlaybackRateRef.current?.(clampedRate);
+        console.log(`[Room] NUDGE: drift=${drift.toFixed(2)}s, rate=${clampedRate.toFixed(3)}`);
+      } else {
+        // Within tolerance, normalize rate
+        if (getAudioElement() && Math.abs(getAudioElement()!.playbackRate - 1.0) > 0.01) {
+          setPlaybackRateRef.current?.(1.0);
+        }
+      }
+    }, 2000); // Check every 2 seconds
     
-    const now = Date.now();
-    const currentPos = audio.currentTime || 0;
-    const totalDuration = audio.duration || 0;
-    const remainingMs = (totalDuration - currentPos) * 1000;
-    
-    // Target end time = now + buffer + remaining duration
-    // This ensures all devices have time to receive the message before playback should end
-    const targetEndTime = now + SYNC_BUFFER_MS + remainingMs;
-    
-    console.log(`[Room] Broadcasting target end time: now=${now}, currentPos=${currentPos}s, remaining=${remainingMs}ms, targetEndTime=${targetEndTime}`);
-    
-    updatePlaybackStateRef.current({
-      currentTrackIndex: currentIndexRef.current,
-      targetEndTime,
-      trackDuration: remainingMs,
-      queue: queueRef.current,
-    });
-  }, [isHost, currentTrack]);
+    return () => clearInterval(driftCheckInterval);
+  }, [isHost, isConnected, getCurrentTime, getAudioElement]);
 
   const handleTogglePlay = useCallback(() => {
     if (!isHost) {
@@ -380,24 +385,40 @@ const Room = () => {
       return;
     }
 
-    clearScheduledTimers();
-
     if (isPlaying) {
       pauseRef.current?.();
       setIsPlaying(false);
+      // Pause: clear startEpoch, set serverElapsedMs to current position
+      const currentPos = getCurrentTime();
       updatePlaybackStateRef.current?.({
         currentTrackIndex: currentIndexRef.current,
-        targetEndTime: null,
-        trackDuration: null,
+        startEpoch: null,
+        serverElapsedMs: currentPos * 1000, // save position for resume
+        trackDuration: (audioRef.current?.duration || 0) * 1000,
         queue: queueRef.current,
       });
     } else {
+      // Play: set startEpoch to server time "now"
+      const serverNow = getServerTimeRef.current?.() || Date.now();
+      const audio = audioRef.current;
+      const currentPos = audio?.currentTime || 0;
+      const totalDuration = audio?.duration || 0;
+      const remainingMs = (totalDuration - currentPos) * 1000;
+      
+      console.log(`[Room] Play: serverNow=${serverNow}, currentPos=${currentPos}s, remaining=${remainingMs}ms`);
+      
       playRef.current?.();
       setIsPlaying(true);
-      // Calculate and broadcast target end time
-      calculateAndBroadcastTargetEndTime();
+      
+      updatePlaybackStateRef.current?.({
+        currentTrackIndex: currentIndexRef.current,
+        startEpoch: serverNow, // server time when track started
+        serverElapsedMs: 0, // 0 ms elapsed (just started)
+        trackDuration: remainingMs,
+        queue: queueRef.current,
+      });
     }
-  }, [isHost, isPlaying, calculateAndBroadcastTargetEndTime, clearScheduledTimers]);
+  }, [isHost, isPlaying, getCurrentTime]);
 
   const handleNext = useCallback(() => {
     if (!isHost) {
@@ -406,21 +427,28 @@ const Room = () => {
     }
     if (queueRef.current.length === 0) return;
     
-    clearScheduledTimers();
-    
     const nextIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
     setCurrentIndex(nextIdx);
-    setIsPlaying(true);
-    
     setTimeout(() => {
       playRef.current?.();
-      // Calculate and broadcast for new track
-      calculateAndBroadcastTargetEndTime();
+      // New track: set startEpoch to "now" on server
+      const serverNow = getServerTimeRef.current?.() || Date.now();
+      const audio = audioRef.current;
+      const totalDuration = audio?.duration || 0;
+      
+      updatePlaybackStateRef.current?.({
+        isPlaying: true,
+        currentTrackIndex: nextIdx,
+        startEpoch: serverNow,
+        serverElapsedMs: 0,
+        trackDuration: totalDuration * 1000,
+        queue: queueRef.current,
+      });
     }, 100);
-  }, [isHost, clearScheduledTimers, calculateAndBroadcastTargetEndTime]);
+  }, [isHost]);
 
   const handlePrevious = useCallback(() => {
     if (!isHost) {
@@ -429,46 +457,75 @@ const Room = () => {
     }
     if (queueRef.current.length === 0) return;
     
-    clearScheduledTimers();
-    
     const prevIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
     setCurrentIndex(prevIdx);
-    setIsPlaying(true);
-    
     setTimeout(() => {
       playRef.current?.();
-      calculateAndBroadcastTargetEndTime();
+      const serverNow = getServerTimeRef.current?.() || Date.now();
+      const audio = audioRef.current;
+      const totalDuration = audio?.duration || 0;
+      
+      updatePlaybackStateRef.current?.({
+        isPlaying: true,
+        currentTrackIndex: prevIdx,
+        startEpoch: serverNow,
+        serverElapsedMs: 0,
+        trackDuration: totalDuration * 1000,
+        queue: queueRef.current,
+      });
     }, 100);
-  }, [isHost, clearScheduledTimers, calculateAndBroadcastTargetEndTime]);
+  }, [isHost]);
 
   const handleTrackClick = useCallback((idx: number) => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
       return;
     }
-
-    clearScheduledTimers();
     setCurrentIndex(idx);
-    setIsPlaying(true);
-    
     setTimeout(() => {
       playRef.current?.();
-      calculateAndBroadcastTargetEndTime();
+      const serverNow = getServerTimeRef.current?.() || Date.now();
+      const audio = audioRef.current;
+      const totalDuration = audio?.duration || 0;
+      
+      updatePlaybackStateRef.current?.({
+        isPlaying: true,
+        currentTrackIndex: idx,
+        startEpoch: serverNow,
+        serverElapsedMs: 0,
+        trackDuration: totalDuration * 1000,
+        queue: queueRef.current,
+      });
     }, 100);
-  }, [isHost, clearScheduledTimers, calculateAndBroadcastTargetEndTime]);
+  }, [isHost]);
 
   const handleSeekFromBar = useCallback((time: number) => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
       return;
     }
-    seekRef.current?.(time);
-    // Recalculate and broadcast new target end time after seek
-    calculateAndBroadcastTargetEndTime();
-  }, [isHost, calculateAndBroadcastTargetEndTime]);
+    seekRef.current(time);
+    // After seek, reset startEpoch and elapsed
+    if (isPlaying) {
+      const serverNow = getServerTimeRef.current?.() || Date.now();
+      const audio = audioRef.current;
+      const remainingMs = (audio?.duration || 0) * 1000 - time * 1000;
+      
+      updatePlaybackStateRef.current?.({
+        startEpoch: serverNow,
+        serverElapsedMs: time * 1000,
+        trackDuration: remainingMs,
+      });
+    } else {
+      updatePlaybackStateRef.current?.({
+        startEpoch: null,
+        serverElapsedMs: time * 1000,
+      });
+    }
+  }, [isHost, isPlaying]);
 
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
@@ -590,7 +647,6 @@ const Room = () => {
   }, [isHost, banUser]);
 
   const handleLeaveRoom = () => {
-    clearScheduledTimers();
     navigate("/");
   };
 
@@ -601,13 +657,6 @@ const Room = () => {
   const handleGoHome = () => {
     navigate("/");
   };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      clearScheduledTimers();
-    };
-  }, [clearScheduledTimers]);
 
   if (sessionEnded) {
     return (
@@ -708,7 +757,7 @@ const Room = () => {
                   {isHost ? "YOU ARE HOST" : "SYNCED WITH HOST"}
                 </span>
               </div>
-              <span className="text-gray-500">TARGET-END SYNC</span>
+              <span className="text-gray-500">ELAPSED-TIME SYNC</span>
             </div>
 
             <TrackInfo track={currentTrack} />
@@ -760,7 +809,7 @@ const Room = () => {
       </main>
 
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
-        Meoww - Target-End-Time Audio Sync
+        Meoww - NTP + Elapsed-Time Audio Sync
       </footer>
     </div>
   );
