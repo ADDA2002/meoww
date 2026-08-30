@@ -78,6 +78,7 @@ const Room = () => {
   const currentIndexRef = useRef<number>(currentIndex);
   const currentTimeRef = useRef<number>(currentTime);
   const isPlayingRef = useRef<boolean>(isPlaying);
+  const isTransitioningRef = useRef<boolean>(false);
 
   // Keep refs updated
   usersRef.current = users;
@@ -298,83 +299,150 @@ const Room = () => {
     }
   };
 
-  // Playback controls
-  const handleTogglePlay = () => {
+  // ==========================================
+  // PLAYBACK CONTROL FUNCTIONS (PROPERLY WRITTEN)
+  // ==========================================
+
+  /**
+   * Plays a track at the given index from the beginning (0)
+   * Updates state, audio element, and broadcasts PLAY to all users
+   */
+  const playTrack = async (trackIndex: number) => {
+    const audio = audioRef.current;
+    if (!audio || queueRef.current.length === 0) return;
+
+    // Clamp index to valid range
+    const clampedIndex = Math.max(0, Math.min(trackIndex, queueRef.current.length - 1));
+
+    // Update state
+    setCurrentIndex(clampedIndex);
+    audio.currentTime = 0;
+
+    try {
+      await audio.play();
+      setIsPlaying(true);
+
+      // Broadcast PLAY to all connected users
+      broadcast({
+        type: "PLAY",
+        trackIndex: clampedIndex,
+        seekTime: 0,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      console.error("Failed to play track:", error);
+      setIsPlaying(false);
+    }
+  };
+
+  /**
+   * Pauses playback
+   * Updates state, pauses audio element, and broadcasts PAUSE to all users
+   */
+  const pausePlayback = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
+    audio.pause();
+    const seekTime = audio.currentTime;
+    setIsPlaying(false);
+
+    // Broadcast PAUSE to all connected users
+    broadcast({
+      type: "PAUSE",
+      seekTime,
+    });
+  };
+
+  /**
+   * Toggles between play and pause
+   */
+  const handleTogglePlay = () => {
     if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-      broadcast({ type: "PAUSE", seekTime: audio.currentTime });
+      pausePlayback();
     } else {
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({
-          type: "PLAY",
-          trackIndex: currentIndex,
-          seekTime: audio.currentTime,
-          timestamp: Date.now(),
-        });
-      }).catch(() => {});
+      playTrack(currentIndexRef.current);
     }
   };
 
-  const handleNext = () => {
-    if (queue.length === 0) return;
-    const nextIdx = isShuffle
-      ? Math.floor(Math.random() * queue.length)
-      : (currentIndex + 1) % queue.length;
-    
-    setCurrentIndex(nextIdx);
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
-      }).catch(() => {});
-    }
+  /**
+   * Goes to the next track in queue
+   * Sequence: PAUSE → PLAY (new track)
+   */
+  const handleNext = async () => {
+    if (queueRef.current.length === 0 || isTransitioningRef.current) return;
+
+    // Prevent double-clicks during transition
+    isTransitioningRef.current = true;
+
+    // Step 1: PAUSE current track
+    pausePlayback();
+
+    // Small delay for UI to update (optional, but smooths transition)
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    // Step 2: Calculate next track index
+    const nextIndex = isShuffle
+      ? Math.floor(Math.random() * queueRef.current.length)
+      : (currentIndexRef.current + 1) % queueRef.current.length;
+
+    // Step 3: PLAY new track
+    await playTrack(nextIndex);
+
+    isTransitioningRef.current = false;
   };
 
-  const handlePrevious = () => {
-    if (queue.length === 0) return;
-    const prevIdx = isShuffle
-      ? Math.floor(Math.random() * queue.length)
-      : (currentIndex - 1 + queue.length) % queue.length;
-    
-    setCurrentIndex(prevIdx);
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
-      }).catch(() => {});
-    }
+  /**
+   * Goes to the previous track in queue
+   * Sequence: PAUSE → PLAY (new track)
+   */
+  const handlePrevious = async () => {
+    if (queueRef.current.length === 0 || isTransitioningRef.current) return;
+
+    // Prevent double-clicks during transition
+    isTransitioningRef.current = true;
+
+    // Step 1: PAUSE current track
+    pausePlayback();
+
+    // Small delay for UI to update
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    // Step 2: Calculate previous track index
+    const prevIndex = isShuffle
+      ? Math.floor(Math.random() * queueRef.current.length)
+      : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
+
+    // Step 3: PLAY new track
+    await playTrack(prevIndex);
+
+    isTransitioningRef.current = false;
   };
 
+  /**
+   * Seeks to a specific time position
+   */
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const targetTime = parseFloat(e.target.value);
     const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = targetTime;
-      setCurrentTime(targetTime);
-      broadcast({ type: "SEEK", seekTime: targetTime, timestamp: Date.now() });
-    }
+    if (!audio) return;
+
+    const seekTime = parseFloat(e.target.value);
+    audio.currentTime = seekTime;
+    setCurrentTime(seekTime);
+
+    broadcast({
+      type: "SEEK",
+      seekTime,
+      timestamp: Date.now(),
+    });
   };
 
+  /**
+   * Click on a track in queue to play it
+   */
   const handleTrackClick = (idx: number) => {
     if (!isHost) return;
-    setCurrentIndex(idx);
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
-      }).catch(() => {});
-    }
+    playTrack(idx);
   };
 
   // Queue management
