@@ -50,6 +50,7 @@ const Room = () => {
   const {
     isPlaying,
     isMuted,
+    isLoaded,
     setIsMuted,
     currentTime,
     duration,
@@ -149,21 +150,31 @@ const Room = () => {
     });
   }, [isConnected, myId, getUsers]);
 
-  // Playback controls
+  // Playback controls - now using refs to avoid stale closures
+  const playRef = useRef(play);
+  const pauseRef = useRef(pause);
+  const seekRef = useRef(seek);
+  const broadcastRef = useRef(broadcast);
+
+  playRef.current = play;
+  pauseRef.current = pause;
+  seekRef.current = seek;
+  broadcastRef.current = broadcast;
+
   const handleTogglePlay = useCallback(() => {
     if (isPlaying) {
-      pause();
-      broadcast({ type: "PAUSE", seekTime: getCurrentTime() });
+      pauseRef.current();
+      broadcastRef.current({ type: "PAUSE", seekTime: getCurrentTime() });
     } else {
-      play();
-      broadcast({
+      playRef.current();
+      broadcastRef.current({
         type: "PLAY",
         trackIndex: currentIndex,
         seekTime: getCurrentTime(),
         timestamp: Date.now(),
       });
     }
-  }, [isPlaying, pause, play, broadcast, getCurrentTime, currentIndex]);
+  }, [isPlaying, currentIndex, getCurrentTime]);
 
   const handleNext = useCallback(() => {
     if (queue.length === 0) return;
@@ -171,19 +182,21 @@ const Room = () => {
     const nextIdx = isShuffle
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex + 1) % queue.length;
+
+    // Update index first (this triggers audio element to load new track)
+    setCurrentIndex(nextIdx);
     
-    // Pause first
-    pause();
-    broadcast({ type: "PAUSE", seekTime: 0 });
+    // Pause and broadcast
+    pauseRef.current();
+    broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
-    // Then play new track
+    // Play when ready
     setTimeout(() => {
-      setCurrentIndex(nextIdx);
-      seek(0);
-      play();
-      broadcast({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
-    }, 100);
-  }, [queue.length, isShuffle, currentIndex, pause, broadcast, seek, play]);
+      seekRef.current(0);
+      playRef.current();
+      broadcastRef.current({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
+    }, 50);
+  }, [queue.length, isShuffle, currentIndex]);
 
   const handlePrevious = useCallback(() => {
     if (queue.length === 0) return;
@@ -191,35 +204,39 @@ const Room = () => {
     const prevIdx = isShuffle
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex - 1 + queue.length) % queue.length;
+
+    // Update index first
+    setCurrentIndex(prevIdx);
     
-    // Pause first
-    pause();
-    broadcast({ type: "PAUSE", seekTime: 0 });
+    // Pause and broadcast
+    pauseRef.current();
+    broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
-    // Then play new track
+    // Play when ready
     setTimeout(() => {
-      setCurrentIndex(prevIdx);
-      seek(0);
-      play();
-      broadcast({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
-    }, 100);
-  }, [queue.length, isShuffle, currentIndex, pause, broadcast, seek, play]);
+      seekRef.current(0);
+      playRef.current();
+      broadcastRef.current({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
+    }, 50);
+  }, [queue.length, isShuffle, currentIndex]);
 
   const handleTrackClick = useCallback((idx: number) => {
     if (!isHost) return;
+
+    // Update index first
+    setCurrentIndex(idx);
     
-    // Pause first
-    pause();
-    broadcast({ type: "PAUSE", seekTime: 0 });
+    // Pause and broadcast
+    pauseRef.current();
+    broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
-    // Then play new track
+    // Play when ready
     setTimeout(() => {
-      setCurrentIndex(idx);
-      seek(0);
-      play();
-      broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
-    }, 100);
-  }, [isHost, pause, broadcast, seek, play]);
+      seekRef.current(0);
+      playRef.current();
+      broadcastRef.current({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
+    }, 50);
+  }, [isHost]);
 
   // Queue management
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
