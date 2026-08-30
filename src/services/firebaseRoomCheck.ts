@@ -10,11 +10,13 @@ import { db, ref, get } from "./firebase";
  */
 export const checkFirebaseRoomExists = async (code: string): Promise<boolean> => {
   if (!db) {
+    console.warn("[RoomCheck] Firebase not initialized, allowing through");
     return true; // Allow through if Firebase isn't initialized
   }
 
   try {
     const normalized = code.trim().toLowerCase();
+    console.log(`[RoomCheck] Looking for room at rooms/${normalized}/state AND rooms/${normalized}/users`);
 
     // Check both possible subpaths and accept if either has data
     const [stateSnap, usersSnap] = await Promise.all([
@@ -22,9 +24,18 @@ export const checkFirebaseRoomExists = async (code: string): Promise<boolean> =>
       get(ref(db, `rooms/${normalized}/users`)),
     ]);
 
-    return stateSnap.exists() || usersSnap.exists();
+    const stateExists = stateSnap.exists();
+    const usersExists = usersSnap.exists();
+    const stateData = stateSnap.val();
+    const usersData = usersSnap.val();
+
+    console.log(`[RoomCheck] state: ${stateExists}, users: ${usersExists}`);
+    if (stateData) console.log(`[RoomCheck] state data:`, stateData);
+    if (usersData) console.log(`[RoomCheck] users data:`, usersData);
+
+    return stateExists || usersExists;
   } catch (err) {
-    console.warn("Room check skipped (Firebase error):", err);
+    console.error("[RoomCheck] Error checking room:", err);
     return true; // Allow through on any Firebase error
   }
 };
