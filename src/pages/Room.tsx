@@ -19,7 +19,6 @@ import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
-// Sync threshold: resync if drift is more than this many seconds
 const SYNC_THRESHOLD_SECONDS = 0.5;
 
 const Room = () => {
@@ -59,6 +58,7 @@ const Room = () => {
   const isPlayingRef = useRef(false);
   const lastVetoToastRef = useRef<boolean | null>(null);
   const lastSyncTimeRef = useRef<number>(0);
+  const latestStateRef = useRef<FirebaseSyncState | null>(null);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -167,32 +167,6 @@ const Room = () => {
     }
   }, [isHost]);
 
-  // Auto-resync check for members
-  useEffect(() => {
-    if (isHost || !isConnected) return;
-    
-    const checkInterval = setInterval(() => {
-      const state = latestStateRef.current;
-      if (!state) return;
-      if (!state.isPlaying || !isPlayingRef.current) return;
-      if (Date.now() - lastSyncTimeRef.current < 2000) return;
-      
-      const hostTime = state.currentTime;
-      const myTime = audioRef.current?.currentTime || 0;
-      const drift = Math.abs(myTime - hostTime);
-      
-      if (drift > SYNC_THRESHOLD_SECONDS) {
-        console.log(`[Room] Auto-resync triggered: drift=${drift.toFixed(2)}s > ${SYNC_THRESHOLD_SECONDS}s`);
-        seekRef.current(hostTime);
-        lastSyncTimeRef.current = Date.now();
-      }
-    }, 1000);
-    
-    return () => clearInterval(checkInterval);
-  }, [isHost, isConnected]);
-
-  const latestStateRef = useRef<FirebaseSyncState | null>(null);
-
   const handleStateChangeWithStore = useCallback((state: FirebaseSyncState) => {
     latestStateRef.current = state;
     handleStateChange(state);
@@ -233,6 +207,16 @@ const Room = () => {
     setSessionEnded(true);
   }, []);
 
+  // Initialize connection - this MUST be before the auto-resync useEffect
+  useEffect(() => {
+    if (!roomCode) return;
+    const generatedId = isHost
+      ? `host-${roomCode.toLowerCase()}`
+      : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
+    setMyId(generatedId);
+  }, [roomCode, isHost]);
+
+  // Firebase sync hook - MUST be before any useEffect that uses isConnected
   const { isConnected, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
     roomCode,
     myId,
@@ -246,18 +230,12 @@ const Room = () => {
     onSessionEnded: handleSessionEnded,
   });
 
+  // Store refs - AFTER useFirebaseSync
   useEffect(() => {
     updatePlaybackStateRef.current = updatePlaybackState;
   }, [updatePlaybackState]);
 
-  useEffect(() => {
-    if (!roomCode) return;
-    const generatedId = isHost
-      ? `host-${roomCode.toLowerCase()}`
-      : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
-    setMyId(generatedId);
-  }, [roomCode, isHost]);
-
+  // Load initial state when connected (for members joining mid-session)
   useEffect(() => {
     if (!isConnected || !myId || isHost || isInitializedRef.current) return;
     isInitializedRef.current = true;
@@ -289,6 +267,30 @@ const Room = () => {
     };
     loadInitialState();
   }, [isConnected, myId, isHost, getState, getUsers]);
+
+  // Auto-resync check for members - AFTER isConnected is initialized
+  useEffect(() => {
+    if (isHost || !isConnected) return;
+    
+    const checkInterval = setInterval(() => {
+      const state = latestStateRef.current;
+      if (!state) return;
+      if (!state.isPlaying || !isPlayingRef.current) return;
+      if (Date.now() - lastSyncTimeRef.current < 2000) return;
+      
+      const hostTime = state.currentTime;
+      const myTime = audioRef.current?.currentTime || 0;
+      const drift = Math.abs(myTime - hostTime);
+      
+      if (drift > SYNC_THRESHOLD_SECONDS) {
+        console.log(`[Room] Auto-resync triggered: drift=${drift.toFixed(2)}s > ${SYNC_THRESHOLD_SECONDS}s`);
+        seekRef.current(hostTime);
+        lastSyncTimeRef.current = Date.now();
+      }
+    }, 1000);
+    
+    return () => clearInterval(checkInterval);
+  }, [isHost, isConnected]);
 
   const handleTogglePlay = useCallback(() => {
     if (!isHost) {
