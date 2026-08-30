@@ -34,7 +34,6 @@ import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 import RoomDrawer from "@/components/RoomDrawer";
-import Header from "@/components/Header";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -693,11 +692,27 @@ const Room = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
-      {/* Single consistent header - just logo and Meoww, with menu icon only on room page */}
-      <Header showRoomOptions={true} />
+      {/* Top Room Navigation Bar */}
+      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
+        <div className="flex items-center gap-2">
+          <img
+            src="/logo.gif"
+            alt="Meoww Logo"
+            className="w-8 h-8 object-contain"
+          />
+          <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <RoomDrawer
+            roomCode={roomCode}
+            userName={userName}
+            onLeave={handleLeaveRoom}
+          />
+        </div>
+      </header>
 
       {/* Main Room Layout */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 pt-20">
+      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Music Player & Host Dashboard */}
         <div className="lg:col-span-7 space-y-6">
           {/* Active Player Card */}
@@ -1026,13 +1041,6 @@ const Room = () => {
           </div>
         </div>
       </main>
-
-      {/* Room Drawer - triggered by the menu button in the header */}
-      <RoomDrawer
-        roomCode={roomCode}
-        userName={userName}
-        onLeave={handleLeaveRoom}
-      />
 
       {/* Hidden Audio element controlling synchronization */}
       <audio
