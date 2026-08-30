@@ -12,6 +12,7 @@ import {
   ArrowUp, 
   ArrowDown, 
   Trash2, 
+  Radio, 
   Music, 
   Upload, 
   Users,
@@ -123,7 +124,7 @@ const Room = () => {
           clearTimeout(timeout);
           try { testPeer.destroy(); } catch (e) { /* noop */ }
         });
-      };
+      });
 
       testPeer.on("error", () => {
         clearTimeout(timeout);
@@ -694,6 +695,7 @@ const Room = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
+      {/* Room page header - shows drawer button instead of logo/SYNCED */}
       <Header showDrawerButton={true} />
 
       {/* Main Room Layout */}
@@ -863,7 +865,7 @@ const Room = () => {
                     )}
                   </div>
                 </div>
-              }))
+              ))}
             </div>
           </div>
 

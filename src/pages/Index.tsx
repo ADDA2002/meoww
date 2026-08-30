@@ -227,7 +227,8 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
-      <Header /> {/* No showDrawerButton prop - will show default header without drawer button */}
+      {/* Home screen header - shows logo and SYNCED */}
+      <Header />
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
