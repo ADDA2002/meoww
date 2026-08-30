@@ -34,6 +34,10 @@ import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 import RoomDrawer from "@/components/RoomDrawer";
+import { useClockSync } from "@/hooks/useClockSync";
+import { syncEngine } from "@/lib/syncEngine";
+import { useSyncEngine } from "@/hooks/useSyncEngine";
+import { SyncCalibrator } from "@/components/SyncCalibrator";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -59,7 +63,6 @@ const Room = () => {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
-  const [ping, setPing] = useState<number>(0);
   const [audioLoaded, setAudioLoaded] = useState<boolean>(false);
 
   // Add Song Dialog State
@@ -88,6 +91,22 @@ const Room = () => {
   isPlayingRef.current = isPlaying;
   audioLoadedRef.current = audioLoaded;
 
+  // Host peer ID for listeners to connect to
+  const hostPeerId = isHost ? null : `meoww-room-${roomCode.toLowerCase()}`;
+
+  // Clock sync - calibrates clock offset between devices
+  const { syncQuality, runSync } = useClockSync(
+    peerRef.current,
+    isHost,
+    hostPeerId,
+    (offsetMs) => {
+      syncEngine.setClockOffset(offsetMs);
+    }
+  );
+
+  // Subscribe to the sync engine for high-precision time display
+  const syncState = useSyncEngine();
+
   const currentTrack = queue[currentIndex] || null;
 
   // Sync mute state to audio element
@@ -102,52 +121,6 @@ const Room = () => {
     setAudioLoaded(false);
     audioLoadedRef.current = false;
   }, [currentTrack?.url]);
-
-  // Ping measurement (listeners only)
-  useEffect(() => {
-    if (isHost) return; // Only listeners ping the host
-
-    const measurePing = () => {
-      const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-      const testPeer = new Peer(`${myId}-ping-${Date.now()}`, { debug: 0 });
-      
-      const timeout = setTimeout(() => {
-        try { testPeer.destroy(); } catch (e) { /* noop */ }
-        setPing((prev) => prev || 0);
-      }, 2000);
-
-      testPeer.on("open", () => {
-        const startTime = Date.now();
-        const conn = testPeer.connect(hostPeerId, { reliable: true });
-
-        conn.on("open", () => {
-          clearTimeout(timeout);
-          const endTime = Date.now();
-          setPing(endTime - startTime);
-          try { conn.close(); } catch (e) { /* noop */ }
-          try { testPeer.destroy(); } catch (e) { /* noop */ }
-        });
-
-        conn.on("error", () => {
-          clearTimeout(timeout);
-          try { testPeer.destroy(); } catch (e) { /* noop */ }
-        });
-      });
-
-      testPeer.on("error", () => {
-        clearTimeout(timeout);
-        try { testPeer.destroy(); } catch (e) { /* noop */ }
-      });
-    };
-
-    const initialTimer = setTimeout(measurePing, 1000);
-    const interval = setInterval(measurePing, 5000);
-
-    return () => {
-      clearTimeout(initialTimer);
-      clearInterval(interval);
-    };
-  }, [isHost, roomCode, myId]);
 
   // Broadcast message to all active peer connections
   const broadcast = (msg: SyncMessage) => {
@@ -211,8 +184,8 @@ const Room = () => {
       setIsConnected(true);
       
       if (!isHost) {
-        const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-        const conn = peer.connect(hostPeerId, { reliable: true });
+        const hostPeerIdInner = `meoww-room-${roomCode.toLowerCase()}`;
+        const conn = peer.connect(hostPeerIdInner, { reliable: true });
         setupConnection(conn, currentUser);
       }
     });
@@ -283,11 +256,15 @@ const Room = () => {
           });
 
           if (audio && !audio.paused) {
+            // Send PLAY with clock-anchored timestamps
+            const syncMsg = syncEngine.buildSyncMessage(currentSeek);
             conn.send({
               type: "PLAY",
               trackIndex: currentIndexRef.current,
               seekTime: currentSeek,
-              timestamp: Date.now(),
+              timestamp: syncMsg.timestamp,
+              startUnixMs: syncMsg.startUnixMs,
+              startPerfNow: syncMsg.startPerfNow,
             });
           }
         }
@@ -375,13 +352,67 @@ const Room = () => {
         const audio = audioRef.current;
         if (!audio) return;
 
+        // Use clock-anchored sync if available
+        const extendedMsg = msg as any;
+        if (extendedMsg.startPerfNow !== undefined && extendedMsg.startUnixMs !== undefined) {
+          // Calculate the listener's expected current time using the clock offset
+          const latencySec = (Date.now() - msg.timestamp) / 1000;
+          const seekTime = msg.seekTime + latencySec;
+
+          // If track is changing, wait for the new audio to load
+          if (currentIndexRef.current !== msg.trackIndex) {
+            setCurrentIndex(msg.trackIndex);
+            pendingSeekRef.current = seekTime;
+          } else if (Math.abs(audio.currentTime - seekTime) > 0.15) {
+            audio.currentTime = seekTime;
+          }
+
+          const attemptPlay = () => {
+            audio.play().then(() => {
+              setIsPlaying(true);
+              isPlayingRef.current = true;
+              // Use the sync engine to anchor to absolute time
+              syncEngine.play({
+                unixTimestamp: extendedMsg.startUnixMs,
+                startPerfNow: extendedMsg.startPerfNow,
+                seekOffset: seekTime,
+                duration: duration,
+                clockOffset: syncEngine.getCurrentState ? 0 : 0,
+              });
+              if (pendingSeekRef.current !== null) {
+                audio.currentTime = pendingSeekRef.current;
+                pendingSeekRef.current = null;
+              }
+            }).catch((e) => {
+              console.log("Play error:", e);
+              setTimeout(() => {
+                audio.play().then(() => {
+                  setIsPlaying(true);
+                  isPlayingRef.current = true;
+                }).catch(console.error);
+              }, 200);
+            });
+          };
+
+          if (audio.readyState >= 3) {
+            attemptPlay();
+          } else {
+            const onCanPlay = () => {
+              audio.removeEventListener("canplay", onCanPlay);
+              attemptPlay();
+            };
+            audio.addEventListener("canplay", onCanPlay);
+            audio.load();
+          }
+          return;
+        }
+
+        // Fallback: legacy sync without clock anchoring
         const latencySec = (Date.now() - msg.timestamp) / 1000;
         const targetTime = msg.seekTime + latencySec;
 
-        // If track is changing, wait for the new audio to load
         if (currentIndexRef.current !== msg.trackIndex) {
           setCurrentIndex(msg.trackIndex);
-          // Store the seek target so it applies once the new track loads
           pendingSeekRef.current = targetTime;
         } else if (Math.abs(audio.currentTime - targetTime) > 0.15) {
           audio.currentTime = targetTime;
@@ -391,14 +422,12 @@ const Room = () => {
           audio.play().then(() => {
             setIsPlaying(true);
             isPlayingRef.current = true;
-            // Apply pending seek if there was one
             if (pendingSeekRef.current !== null) {
               audio.currentTime = pendingSeekRef.current;
               pendingSeekRef.current = null;
             }
           }).catch((e) => {
             console.log("Play error:", e);
-            // Retry once after a short delay
             setTimeout(() => {
               audio.play().then(() => {
                 setIsPlaying(true);
@@ -411,13 +440,11 @@ const Room = () => {
         if (audio.readyState >= 3) {
           attemptPlay();
         } else {
-          // Wait for the new audio to be ready
           const onCanPlay = () => {
             audio.removeEventListener("canplay", onCanPlay);
             attemptPlay();
           };
           audio.addEventListener("canplay", onCanPlay);
-          // Force load
           audio.load();
         }
         break;
@@ -430,6 +457,8 @@ const Room = () => {
           audio.pause();
           setIsPlaying(false);
           isPlayingRef.current = false;
+          // Update sync engine to reflect paused state
+          syncEngine.pause(msg.seekTime);
         }
         break;
       }
@@ -439,6 +468,8 @@ const Room = () => {
         if (audio) {
           const latencySec = (Date.now() - msg.timestamp) / 1000;
           audio.currentTime = msg.seekTime + latencySec;
+          // Update sync engine seek position
+          syncEngine.seek(msg.seekTime + latencySec);
         }
         break;
       }
@@ -506,24 +537,48 @@ const Room = () => {
         playPromise.then(() => {
           setIsPlaying(true);
           isPlayingRef.current = true;
+          
+          // Build sync message with clock-anchored timestamps
+          const syncMsg = syncEngine.buildSyncMessage(seekTime);
+          
+          // Start the sync engine anchored to the absolute clock
+          syncEngine.play({
+            unixTimestamp: syncMsg.startUnixMs,
+            startPerfNow: syncMsg.startPerfNow,
+            seekOffset: seekTime,
+            duration: duration,
+          });
+          
+          // Broadcast to listeners with clock-anchored data
           broadcast({
             type: "PLAY",
             trackIndex: trackIndex,
             seekTime: seekTime,
-            timestamp: Date.now(),
-          });
+            timestamp: syncMsg.timestamp,
+            startUnixMs: syncMsg.startUnixMs,
+            startPerfNow: syncMsg.startPerfNow,
+          } as any);
         }).catch((err) => {
           console.log("Play attempt failed, retrying:", err);
           setTimeout(() => {
             audio.play().then(() => {
               setIsPlaying(true);
               isPlayingRef.current = true;
+              const syncMsg = syncEngine.buildSyncMessage(seekTime);
+              syncEngine.play({
+                unixTimestamp: syncMsg.startUnixMs,
+                startPerfNow: syncMsg.startPerfNow,
+                seekOffset: seekTime,
+                duration: duration,
+              });
               broadcast({
                 type: "PLAY",
                 trackIndex: trackIndex,
                 seekTime: seekTime,
-                timestamp: Date.now(),
-              });
+                timestamp: syncMsg.timestamp,
+                startUnixMs: syncMsg.startUnixMs,
+                startPerfNow: syncMsg.startPerfNow,
+              } as any);
             }).catch(console.error);
           }, 300);
         });
@@ -554,15 +609,18 @@ const Room = () => {
     if (!audio) return;
 
     if (isPlaying) {
+      const pauseTime = syncState.isPlaying ? syncState.currentTime : audio.currentTime;
       audio.pause();
       setIsPlaying(false);
       isPlayingRef.current = false;
+      syncEngine.pause(pauseTime);
       broadcast({
         type: "PAUSE",
-        seekTime: audio.currentTime,
+        seekTime: pauseTime,
       });
     } else {
-      playAudio(currentIndex, audio.currentTime);
+      const seekFrom = syncState.isPlaying ? syncState.currentTime : audio.currentTime;
+      playAudio(currentIndex, seekFrom);
     }
   };
 
@@ -614,6 +672,7 @@ const Room = () => {
     if (audio) {
       audio.currentTime = targetTime;
       setCurrentTime(targetTime);
+      syncEngine.seek(targetTime);
       broadcast({
         type: "SEEK",
         seekTime: targetTime,
@@ -752,6 +811,9 @@ const Room = () => {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
+  // Use sync engine's high-precision time when playing, otherwise audio element time
+  const displayTime = syncState.isPlaying ? syncState.currentTime : currentTime;
+
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       {/* Top Room Navigation Bar */}
@@ -775,7 +837,7 @@ const Room = () => {
 
       {/* Main Room Layout */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Music Player & Host Dashboard */}
+        {/* Left Column: Music Player & Sync Calibrator */}
         <div className="lg:col-span-7 space-y-6">
           {/* Active Player Card */}
           <div className="border border-black bg-white p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] relative">
@@ -788,7 +850,7 @@ const Room = () => {
                 </span>
               </div>
               <div className="flex items-center gap-1 text-gray-500">
-                <span>ping {ping}ms</span>
+                <span>ping {syncQuality.rttMs > 0 ? Math.round(syncQuality.rttMs) : 0}ms</span>
               </div>
             </div>
 
@@ -815,19 +877,29 @@ const Room = () => {
               </div>
             </div>
 
-            {/* Time progress bar */}
+            {/* Time progress bar with high-precision time display */}
             <div className="space-y-1.5 mb-6">
               <input
                 type="range"
                 min={0}
                 max={duration || 100}
-                value={currentTime}
+                value={displayTime}
                 onChange={handleSeek}
                 disabled={!isHost}
                 className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black"
               />
               <div className="flex justify-between text-xs font-mono text-gray-500">
-                <span>{formatTime(currentTime)}</span>
+                <span>
+                  {isPlaying && syncState.isPlaying
+                    ? syncState.fullPrecisionTime.split(".")[0]
+                    : formatTime(displayTime)
+                  }
+                  {isPlaying && syncState.isPlaying && (
+                    <span className="text-gray-400">
+                      .{syncState.fullPrecisionTime.split(".")[1]?.slice(0, 3) ?? "000"}
+                    </span>
+                  )}
+                </span>
                 <span>{formatTime(duration)}</span>
               </div>
             </div>
@@ -892,11 +964,15 @@ const Room = () => {
             )}
           </div>
 
-          {/* Quick instructions for uploading own file / github tracks */}
-          <div className="border border-gray-300 p-4 bg-gray-50 text-xs font-mono text-gray-600 space-y-1.5">
-            <p className="font-bold text-black uppercase">🎧 Tip for your own music:</p>
-            <p>You can add any MP3 link from GitHub, or upload your local test.mp3 file directly using the "Add Track" button.</p>
-          </div>
+          {/* Sync Calibrator - shows for listeners only */}
+          <SyncCalibrator
+            peer={peerRef.current}
+            isHost={isHost}
+            hostPeerId={hostPeerId}
+            onOffsetCalibrated={(offset) => {
+              syncEngine.setClockOffset(offset);
+            }}
+          />
         </div>
 
         {/* Right Column: Shared Queue & Connected Listeners */}
@@ -1105,13 +1181,14 @@ const Room = () => {
         src={currentTrack?.url}
         preload="auto"
         onTimeUpdate={() => {
-          if (audioRef.current) {
+          if (audioRef.current && !syncState.isPlaying) {
             setCurrentTime(audioRef.current.currentTime);
           }
         }}
         onLoadedMetadata={() => {
           if (audioRef.current) {
             setDuration(audioRef.current.duration);
+            syncEngine.setDuration(audioRef.current.duration);
           }
         }}
         onCanPlay={() => {
