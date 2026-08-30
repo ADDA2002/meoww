@@ -11,8 +11,8 @@ import { formatTime } from "@/lib/utils";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
-const SYNC_TICK_MS = 500; // host broadcasts position every 500ms
-const RESYNC_THRESHOLD_SEC = 0.3; // member re-seeks if drift exceeds 300ms
+const SYNC_TICK_MS = 500;
+const RESYNC_THRESHOLD_SEC = 0.3;
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -43,6 +43,7 @@ const Room = () => {
   const isHostRef = useRef(isHost);
   const lastSyncStateRef = useRef<FirebaseSyncState | null>(null);
   const lastSyncTimeRef = useRef<number>(0);
+  const hasReceivedStateRef = useRef<boolean>(false);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -93,6 +94,7 @@ const Room = () => {
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     if (isHostRef.current) return;
 
+    hasReceivedStateRef.current = true;
     lastSyncStateRef.current = state;
     lastSyncTimeRef.current = Date.now();
 
@@ -102,8 +104,13 @@ const Room = () => {
     const newIndex = state.currentTrackIndex ?? 0;
     const newQueue = state.queue || [];
 
-    if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
-      setQueue(newQueue);
+    // Member uses the host's queue and track index as source of truth.
+    if (newQueue.length > 0) {
+      const currentQueueIds = queueRef.current.map(t => t.id).join(",");
+      const newQueueIds = newQueue.map(t => t.id).join(",");
+      if (currentQueueIds !== newQueueIds) {
+        setQueue(newQueue);
+      }
     }
 
     const track = newQueue[newIndex];
@@ -152,10 +159,11 @@ const Room = () => {
   const handleIncomingMessage = useCallback((_msg: SyncMessage) => {
   }, []);
 
-  // Initialize audio element
+  // Initialize audio element — paused, no auto-play
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "auto";
+    audio.loop = false;
     audioRef.current = audio;
 
     const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
@@ -164,7 +172,7 @@ const Room = () => {
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
       setIsPlaying(false);
-      if (queueRef.current.length > 0) {
+      if (isHostRef.current && queueRef.current.length > 0) {
         const nextIdx = isShuffleRef.current
           ? Math.floor(Math.random() * queueRef.current.length)
           : (currentIndexRef.current + 1) % queueRef.current.length;
@@ -180,7 +188,8 @@ const Room = () => {
 
     return () => {
       audio.pause();
-      audio.src = "";
+      audio.removeAttribute("src");
+      audio.load();
       audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
       audio.removeEventListener("play", handlePlay);
@@ -189,8 +198,11 @@ const Room = () => {
     };
   }, []);
 
-  // Load track into audio element but keep paused
+  // Host: load track into audio element whenever currentTrack changes
+  // Member: NEVER auto-loads based on currentTrack — track is driven solely by
+  // the Firebase state handler above to avoid double audio.
   useEffect(() => {
+    if (!isHost) return;
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
 
@@ -201,7 +213,7 @@ const Room = () => {
     }
     setCurrentTime(0);
     audio.currentTime = 0;
-  }, [currentTrack]);
+  }, [currentTrack, isHost]);
 
   const { updatePlaybackState } = useFirebaseSync({
     roomCode,
