@@ -108,10 +108,12 @@ const Room = () => {
   const seekRef = useRef(seek);
   const broadcastRef = useRef<((msg: SyncMessage) => void) | null>(null);
   const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
+  const getCurrentTimeRef = useRef(getCurrentTime);
 
   playRef.current = play;
   pauseRef.current = pause;
   seekRef.current = seek;
+  getCurrentTimeRef.current = getCurrentTime;
 
   // Handle state changes from Firebase (PRIMARY sync for playback)
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
@@ -145,7 +147,7 @@ const Room = () => {
     // Handle play/pause state
     if (newIsPlaying) {
       // Only seek+play if not already playing or if significantly out of sync (>1s)
-      const timeDiff = Math.abs(audioRef.current?.currentTime - newTime);
+      const timeDiff = Math.abs(getCurrentTimeRef.current() - newTime);
       if (!isPlayingRef.current || timeDiff > 1) {
         console.log(`[Room] Syncing play at ${newTime} (timeDiff: ${timeDiff})`);
         seekRef.current(newTime);
@@ -218,9 +220,6 @@ const Room = () => {
     console.log(`[Room] Session ended`);
     setSessionEnded(true);
   }, []);
-
-  // Audio ref for time checking
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Firebase sync hook
   const { isConnected, broadcast, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
