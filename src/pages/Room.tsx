@@ -42,7 +42,6 @@ const Room = () => {
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
-  const isInitialMount = useRef(true);
 
   isHostRef.current = isHost;
   currentIndexRef.current = currentIndex;
@@ -82,17 +81,11 @@ const Room = () => {
     onTrackEnded: handleTrackEnded,
   });
 
-  // Auto-play only when track changes (not on initial mount)
+  // Auto-play when track changes (for host auto-advance)
   useEffect(() => {
     if (!isHost || !currentTrack) return;
-
-    // Skip auto-play on the very first render
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-
-    // Auto-play whenever the host switches tracks (skip, previous, click, end)
+    
+    // Try to play whenever currentIndex changes
     play().catch((err) => {
       console.warn("Auto-play after track change failed:", err);
     });
