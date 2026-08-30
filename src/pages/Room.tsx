@@ -15,7 +15,8 @@ import {
   Music, 
   Upload, 
   Users,
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from "lucide-react";
 import Peer, { DataConnection } from "peerjs";
 import { toast } from "sonner";
@@ -51,6 +52,7 @@ const Room = () => {
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [ping, setPing] = useState<number>(0);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
 
   // Audio & Queue states
   const [queue, setQueue] = useState<Track[]>(DEFAULT_TRACKS);
@@ -77,6 +79,7 @@ const Room = () => {
   const currentIndexRef = useRef<number>(currentIndex);
   const reconnectAttemptsRef = useRef<number>(0);
   const pingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initStartedRef = useRef<boolean>(false);
 
   // Keep refs updated for event callbacks
   usersRef.current = users;
@@ -93,11 +96,14 @@ const Room = () => {
     }
   }, [isMuted]);
 
-  // Cleanup ping timeout on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (pingTimeoutRef.current) {
         clearTimeout(pingTimeoutRef.current);
+      }
+      if (peerRef.current && !peerRef.current.destroyed) {
+        peerRef.current.destroy();
       }
     };
   }, []);
@@ -136,7 +142,6 @@ const Room = () => {
   // Single ping measurement (called once after connection)
   const measurePingOnce = (peerInstance: Peer) => {
     if (isHostRef.current) {
-      // Host doesn't ping itself
       return;
     }
 
@@ -169,8 +174,10 @@ const Room = () => {
   };
 
   // Initialize PeerJS connection
-  useEffect(() => {
-    if (!roomCode) return;
+  const initializePeer = () => {
+    if (!roomCode || initStartedRef.current) return;
+    initStartedRef.current = true;
+    setIsReconnecting(true);
 
     const generatedId = isHost 
       ? `meoww-room-${roomCode.toLowerCase()}` 
@@ -192,9 +199,15 @@ const Room = () => {
 
     setUsers([currentUser]);
 
-    // Use a more reliable PeerJS server configuration
+    // Destroy existing peer if any
+    if (peerRef.current && !peerRef.current.destroyed) {
+      peerRef.current.destroy();
+    }
+
+    // Use PeerJS with secure wss:// endpoint
     const peer = new Peer(generatedId, {
-      debug: 0, // Silence logs to reduce noise
+      debug: 0,
+      secure: true,
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
@@ -207,11 +220,10 @@ const Room = () => {
     });
     peerRef.current = peer;
 
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
     peer.on("open", (id) => {
       setIsConnected(true);
       setConnectionError(null);
+      setIsReconnecting(false);
       reconnectAttemptsRef.current = 0;
       
       if (!isHost) {
@@ -231,17 +243,17 @@ const Room = () => {
 
     peer.on("error", (err: any) => {
       console.warn("PeerJS error:", err.type, err.message);
+      setIsReconnecting(false);
       
       if (err.type === "unavailable-id" && isHost) {
         setConnectionError("This room is already hosted elsewhere. Try joining as a listener.");
       } else if (err.type === "peer-unavailable" && !isHost) {
-        // Listener can't find host - retry with backoff
         if (reconnectAttemptsRef.current < 3) {
           reconnectAttemptsRef.current++;
-          const delay = 1500 * reconnectAttemptsRef.current;
+          const delay = 2000 * reconnectAttemptsRef.current;
           toast.error(`Host not reachable. Retrying in ${delay / 1000}s... (${reconnectAttemptsRef.current}/3)`);
           
-          reconnectTimer = setTimeout(() => {
+          setTimeout(() => {
             if (peerRef.current && !peerRef.current.destroyed) {
               const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
               const conn = peerRef.current.connect(hostPeerId, { reliable: true });
@@ -251,8 +263,8 @@ const Room = () => {
         } else {
           setConnectionError(`Could not reach room "${roomCode}". Check the code and your connection.`);
         }
-      } else if (err.type === "network" || err.type === "server-error" || err.type === "socket-error") {
-        setConnectionError("Network unstable. Trying to reconnect...");
+      } else if (err.type === "network" || err.type === "server-error" || err.type === "socket-error" || err.type === "browser-error") {
+        setConnectionError("Connection unstable. Check your internet and click Retry.");
       } else if (err.type === "browser-incompatible") {
         setConnectionError("Your browser doesn't support WebRTC. Try Chrome or Firefox.");
       } else if (err.type === "ssl-unavailable") {
@@ -262,19 +274,25 @@ const Room = () => {
 
     peer.on("disconnected", () => {
       setIsConnected(false);
-      // Auto-reconnect to PeerJS server (peer object can be reused)
       if (peerRef.current && !peerRef.current.destroyed) {
         setTimeout(() => {
           try { peerRef.current?.reconnect(); } catch (e) { /* noop */ }
         }, 1000);
       }
     });
+  };
 
-    return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      peer.destroy();
-    };
-  }, [roomCode]);
+  // Manual retry connection
+  const handleRetryConnection = () => {
+    initStartedRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    setConnectionError(null);
+    setIsConnected(false);
+    if (peerRef.current && !peerRef.current.destroyed) {
+      peerRef.current.destroy();
+    }
+    initializePeer();
+  };
 
   // Connection data handler
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
@@ -669,6 +687,9 @@ const Room = () => {
   };
 
   const handleLeaveRoom = () => {
+    if (peerRef.current && !peerRef.current.destroyed) {
+      peerRef.current.destroy();
+    }
     navigate("/");
   };
 
@@ -678,6 +699,11 @@ const Room = () => {
     const s = Math.floor(secs % 60);
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
+
+  // Initialize on mount
+  useEffect(() => {
+    initializePeer();
+  }, [roomCode]);
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
@@ -700,11 +726,29 @@ const Room = () => {
         </div>
       </header>
 
-      {/* Connection Error Banner */}
+      {/* Connection Error Banner with Retry Button */}
       {connectionError && (
-        <div className="bg-red-50 border-b border-red-300 px-6 py-3 text-xs font-mono text-red-800 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span className="font-semibold uppercase">{connectionError}</span>
+        <div className="bg-amber-50 border-b border-amber-300 px-6 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-sm font-mono text-amber-800">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="font-semibold">{connectionError}</span>
+          </div>
+          <Button
+            onClick={handleRetryConnection}
+            size="sm"
+            className="bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold px-3 py-1.5 flex-shrink-0"
+          >
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+            RETRY
+          </Button>
+        </div>
+      )}
+
+      {/* Reconnecting indicator */}
+      {isReconnecting && (
+        <div className="bg-blue-50 border-b border-blue-300 px-6 py-2 text-xs font-mono text-blue-800 flex items-center gap-2">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+          <span>Connecting to signaling server...</span>
         </div>
       )}
 
@@ -758,8 +802,8 @@ const Room = () => {
                 max={duration || 100}
                 value={currentTime}
                 onChange={handleSeek}
-                disabled={!isHost}
-                className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black"
+                disabled={!isHost || !isConnected}
+                className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black disabled:opacity-50"
               />
               <div className="flex justify-between text-xs font-mono text-gray-500">
                 <span>{formatTime(currentTime)}</span>
@@ -772,7 +816,8 @@ const Room = () => {
               <button
                 type="button"
                 onClick={() => setIsShuffle(!isShuffle)}
-                className={`p-2 border border-black transition-colors ${
+                disabled={!isConnected}
+                className={`p-2 border border-black transition-colors disabled:opacity-50 ${
                   isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
                 title="Toggle Shuffle"
@@ -783,7 +828,8 @@ const Room = () => {
               <button
                 type="button"
                 onClick={handlePrevious}
-                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
+                disabled={!isConnected}
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
                 title="Previous Song"
               >
                 <SkipBack className="w-5 h-5" />
@@ -792,7 +838,8 @@ const Room = () => {
               <button
                 type="button"
                 onClick={handleTogglePlay}
-                className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors"
+                disabled={!isConnected}
+                className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors disabled:opacity-50"
                 title={isPlaying ? "Pause" : "Play"}
               >
                 {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
@@ -801,7 +848,8 @@ const Room = () => {
               <button
                 type="button"
                 onClick={handleNext}
-                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors"
+                disabled={!isConnected}
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
                 title="Next Song"
               >
                 <SkipForward className="w-5 h-5" />
@@ -810,7 +858,8 @@ const Room = () => {
               <button
                 type="button"
                 onClick={() => setIsMuted(!isMuted)}
-                className={`p-2 border border-black transition-colors ${
+                disabled={!isConnected}
+                className={`p-2 border border-black transition-colors disabled:opacity-50 ${
                   isMuted ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
                 title={isMuted ? "Unmute" : "Mute"}
@@ -827,7 +876,7 @@ const Room = () => {
             )}
           </div>
 
-          {/* Quick instructions for uploading own file / github tracks */}
+          {/* Quick instructions */}
           <div className="border border-gray-300 p-4 bg-gray-50 text-xs font-mono text-gray-600 space-y-1.5">
             <p className="font-bold text-black uppercase">Tip for your own music:</p>
             <p>You can add any MP3 link from GitHub, or upload your local test.mp3 file directly using the "Add Track" button.</p>
@@ -976,7 +1025,7 @@ const Room = () => {
                   >
                     <div
                       onClick={() => {
-                        if (isHost) {
+                        if (isHost && isConnected) {
                           setCurrentIndex(idx);
                           broadcast({
                             type: "PLAY",
