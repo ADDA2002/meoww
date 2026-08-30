@@ -45,7 +45,6 @@ const Room = () => {
   const initialIsHost = searchParams.get("host") === "true";
 
   // ============= STATE =============
-  // Peer & connection
   const [myId, setMyId] = useState<string>("");
   const [userName, setUserName] = useState<string>(initialName);
   const [isHost, setIsHost] = useState<boolean>(initialIsHost);
@@ -76,8 +75,10 @@ const Room = () => {
   const queueRef = useRef<Track[]>(queue);
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
+  const pendingPingsRef = useRef<Map<string, number>>(new Map());
+  const lastPingTimeRef = useRef<number>(0);
 
-  // Keep refs synced with state for use inside event handlers
+  // Keep refs synced with state
   useEffect(() => { usersRef.current = users; }, [users]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
@@ -94,49 +95,41 @@ const Room = () => {
     }
   }, [isMuted]);
 
-  // Ping measurement (listeners only)
+  // Ultra-lightweight ping using existing connection (no new PeerJS handshake)
   useEffect(() => {
     if (isHost) return;
 
     const measurePing = () => {
-      const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-      const testPeer = new Peer(`${myId}-ping-${Date.now()}`, { debug: 0 });
-      const startTime = Date.now();
+      // Find the host connection (first open connection)
+      const hostConn = Array.from(connectionsRef.current.values()).find(
+        (conn) => conn.open
+      );
 
-      const timeout = setTimeout(() => {
-        try { testPeer.destroy(); } catch (e) { /* noop */ }
-      }, 3000);
+      if (!hostConn) return;
 
-      testPeer.on("open", () => {
-        const conn = testPeer.connect(hostPeerId, { reliable: true });
+      const pingId = `p${Date.now()}${Math.random().toString(36).substring(2, 6)}`;
+      pendingPingsRef.current.set(pingId, performance.now());
 
-        conn.on("open", () => {
-          clearTimeout(timeout);
-          setPing(Date.now() - startTime);
-          try { conn.close(); } catch (e) { /* noop */ }
-          try { testPeer.destroy(); } catch (e) { /* noop */ }
+      try {
+        hostConn.send({
+          type: "PING",
+          pingId,
+          clientTime: performance.now(),
         });
-
-        conn.on("error", () => {
-          clearTimeout(timeout);
-          try { testPeer.destroy(); } catch (e) { /* noop */ }
-        });
-      });
-
-      testPeer.on("error", () => {
-        clearTimeout(timeout);
-        try { testPeer.destroy(); } catch (e) { /* noop */ }
-      });
+      } catch (e) {
+        pendingPingsRef.current.delete(pingId);
+      }
     };
 
-    const initialTimer = setTimeout(measurePing, 1500);
-    const interval = setInterval(measurePing, 5000);
+    // Measure immediately and every 2 seconds
+    const initialTimer = setTimeout(measurePing, 500);
+    const interval = setInterval(measurePing, 2000);
 
     return () => {
       clearTimeout(initialTimer);
       clearInterval(interval);
     };
-  }, [isHost, roomCode, myId]);
+  }, [isHost]);
 
   // Initialize PeerJS connection
   useEffect(() => {
@@ -234,13 +227,11 @@ const Room = () => {
 
         connectionsRef.current.set(conn.peer, conn);
 
-        // Send JOIN with potentially updated name
         conn.send({
           type: "JOIN",
           user: updatedUser,
         });
 
-        // Send current state to new listener
         const audio = audioRef.current;
         const currentSeek = audio ? audio.currentTime : 0;
 
@@ -264,7 +255,6 @@ const Room = () => {
           });
         }
 
-        // If name was changed, notify the user
         if (uniqueName !== me.name) {
           setTimeout(() => {
             if (conn.open) {
@@ -297,29 +287,57 @@ const Room = () => {
 
   const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
     switch (msg.type) {
+      case "PING": {
+        // Host: respond immediately with pong (no roundtrip calc on our side)
+        if (isHostRef.current) {
+          const conn = connectionsRef.current.get(senderPeerId);
+          if (conn && conn.open) {
+            conn.send({
+              type: "PONG",
+              pingId: (msg as any).pingId,
+              clientTime: (msg as any).clientTime,
+              hostTime: performance.now(),
+            });
+          }
+        }
+        break;
+      }
+
+      case "PONG": {
+        // Listener: calculate roundtrip from our sent timestamp
+        const startTime = pendingPingsRef.current.get((msg as any).pingId);
+        if (startTime !== undefined) {
+          const rtt = performance.now() - startTime;
+          pendingPingsRef.current.delete((msg as any).pingId);
+          // One-way ping is roughly half of roundtrip
+          setPing(Math.max(0, Math.round(rtt / 2)));
+        }
+        break;
+      }
+
       case "NAME_UPDATE": {
-        setUserName(msg.newName);
-        toast.info(`Your name was updated to "${msg.newName}" because "${msg.originalName}" was taken.`);
+        setUserName((msg as any).newName);
+        toast.info(`Your name was updated to "${(msg as any).newName}" because "${(msg as any).originalName}" was taken.`);
         break;
       }
 
       case "JOIN": {
         if (isHostRef.current) {
-          const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
-          const updatedUser = { ...msg.user, name: uniqueName };
+          const uniqueName = generateUniqueName((msg as any).user.name, usersRef.current);
+          const updatedUser = { ...(msg as any).user, name: uniqueName };
           const updatedUsers = [...usersRef.current.filter(u => u.id !== updatedUser.id), updatedUser];
           setUsers(updatedUsers);
           
-          if (uniqueName !== msg.user.name) {
+          if (uniqueName !== (msg as any).user.name) {
             const conn = connectionsRef.current.get(senderPeerId);
             if (conn && conn.open) {
               conn.send({
                 type: "NAME_UPDATE",
                 newName: uniqueName,
-                originalName: msg.user.name,
-              });
+                originalName: (msg as any).user.name,
+              } as any);
             }
-            toast.info(`${msg.user.name} joined as "${uniqueName}" (name adjusted).`);
+            toast.info(`${(msg as any).user.name} joined as "${uniqueName}" (name adjusted).`);
           } else {
             toast.info(`${updatedUser.name} joined the jam!`);
           }
@@ -330,7 +348,7 @@ const Room = () => {
       }
 
       case "USER_LIST": {
-        setUsers(msg.users);
+        setUsers((msg as any).users);
         break;
       }
 
@@ -338,14 +356,13 @@ const Room = () => {
         const audio = audioRef.current;
         if (!audio) return;
 
-        const latencySec = (Date.now() - msg.timestamp) / 1000;
-        const targetTime = msg.seekTime + latencySec;
+        const latencySec = (Date.now() - (msg as any).timestamp) / 1000;
+        const targetTime = (msg as any).seekTime + latencySec;
 
-        if (currentIndexRef.current !== msg.trackIndex) {
-          setCurrentIndex(msg.trackIndex);
+        if (currentIndexRef.current !== (msg as any).trackIndex) {
+          setCurrentIndex((msg as any).trackIndex);
         }
 
-        // Wait for the audio source to be ready before playing
         const playWhenReady = () => {
           if (Math.abs(audio.currentTime - targetTime) > 0.15) {
             audio.currentTime = targetTime;
@@ -364,7 +381,7 @@ const Room = () => {
       case "PAUSE": {
         const audio = audioRef.current;
         if (audio) {
-          audio.currentTime = msg.seekTime;
+          audio.currentTime = (msg as any).seekTime;
           audio.pause();
           setIsPlaying(false);
         }
@@ -374,29 +391,29 @@ const Room = () => {
       case "SEEK": {
         const audio = audioRef.current;
         if (audio) {
-          const latencySec = (Date.now() - msg.timestamp) / 1000;
-          audio.currentTime = msg.seekTime + latencySec;
+          const latencySec = (Date.now() - (msg as any).timestamp) / 1000;
+          audio.currentTime = (msg as any).seekTime + latencySec;
         }
         break;
       }
 
       case "UPDATE_QUEUE": {
-        setQueue(msg.queue);
-        if (msg.activeIndex !== undefined) {
-          setCurrentIndex(msg.activeIndex);
+        setQueue((msg as any).queue);
+        if ((msg as any).activeIndex !== undefined) {
+          setCurrentIndex((msg as any).activeIndex);
         }
         break;
       }
 
       case "HOST_TRANSFER": {
-        if (msg.newHostId === myId) {
+        if ((msg as any).newHostId === myId) {
           setIsHost(true);
           toast.success("You are now the Host of this Jam!");
         } else {
           setIsHost(false);
         }
         setUsers((prev) =>
-          prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId }))
+          prev.map((u) => ({ ...u, isHost: u.id === (msg as any).newHostId }))
         );
         break;
       }
@@ -418,14 +435,13 @@ const Room = () => {
         broadcast({
           type: "HOST_TRANSFER",
           newHostId: nextHost.id,
-        });
+        } as any);
       }
     }
   };
 
   // ============= PLAYBACK CONTROLS =============
 
-  // Helper: Play a specific track index from the beginning
   const playTrackAt = (trackIndex: number) => {
     if (trackIndex < 0 || trackIndex >= queue.length) return;
 
@@ -442,7 +458,7 @@ const Room = () => {
           trackIndex: trackIndex,
           seekTime: 0,
           timestamp: Date.now(),
-        });
+        } as any);
       }).catch(console.error);
       audio.removeEventListener('canplay', playWhenReady);
     };
@@ -451,21 +467,18 @@ const Room = () => {
     audio.load();
   };
 
-  // PLAY / PAUSE toggle
   const handleTogglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
     if (isPlaying) {
-      // Currently playing → pause
       audio.pause();
       setIsPlaying(false);
       broadcast({
         type: "PAUSE",
         seekTime: audio.currentTime,
-      });
+      } as any);
     } else {
-      // Currently paused → play
       audio.play().then(() => {
         setIsPlaying(true);
         broadcast({
@@ -473,7 +486,7 @@ const Room = () => {
           trackIndex: currentIndex,
           seekTime: audio.currentTime,
           timestamp: Date.now(),
-        });
+        } as any);
       }).catch((err) => {
         console.error("Play failed:", err);
         toast.error("Couldn't play this track. Try again.");
@@ -481,7 +494,6 @@ const Room = () => {
     }
   };
 
-  // NEXT song
   const handleNext = () => {
     if (queue.length === 0) return;
     let nextIdx: number;
@@ -493,7 +505,6 @@ const Room = () => {
     playTrackAt(nextIdx);
   };
 
-  // PREVIOUS song
   const handlePrevious = () => {
     if (queue.length === 0) return;
     let prevIdx: number;
@@ -505,17 +516,14 @@ const Room = () => {
     playTrackAt(prevIdx);
   };
 
-  // SHUFFLE toggle
   const handleToggleShuffle = () => {
     setIsShuffle((prev) => !prev);
   };
 
-  // MUTE toggle
   const handleToggleMute = () => {
     setIsMuted((prev) => !prev);
   };
 
-  // SEEK (scrub)
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const targetTime = parseFloat(e.target.value);
     const audio = audioRef.current;
@@ -526,7 +534,7 @@ const Room = () => {
         type: "SEEK",
         seekTime: targetTime,
         timestamp: Date.now(),
-      });
+      } as any);
     }
   };
 
@@ -553,7 +561,7 @@ const Room = () => {
       type: "UPDATE_QUEUE",
       queue: updatedQueue,
       activeIndex: currentIndex,
-    });
+    } as any);
 
     setSongTitle("");
     setSongArtist("");
@@ -582,7 +590,7 @@ const Room = () => {
       type: "UPDATE_QUEUE",
       queue: updatedQueue,
       activeIndex: currentIndex,
-    });
+    } as any);
 
     toast.success(`Loaded local audio: ${file.name}`);
     setAddSongOpen(false);
@@ -610,7 +618,7 @@ const Room = () => {
       type: "UPDATE_QUEUE",
       queue: newQueue,
       activeIndex: newActive,
-    });
+    } as any);
   };
 
   const handleRemoveTrack = (idx: number) => {
@@ -632,7 +640,7 @@ const Room = () => {
       type: "UPDATE_QUEUE",
       queue: newQueue,
       activeIndex: newActive,
-    });
+    } as any);
   };
 
   const handleTransferHost = (targetUserId: string) => {
@@ -644,7 +652,7 @@ const Room = () => {
     broadcast({
       type: "HOST_TRANSFER",
       newHostId: targetUserId,
-    });
+    } as any);
     toast.info("Host controls transferred.");
   };
 
