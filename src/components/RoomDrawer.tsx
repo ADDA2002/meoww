@@ -46,15 +46,8 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
       <SheetContent 
         className="border-l border-black bg-white text-black rounded-none p-0 [&>button]:hidden"
       >
-        <SheetHeader className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <img
-              src="/logo.gif"
-              alt="Meoww Logo"
-              className="w-8 h-8 object-contain"
-            />
-            <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
-          </div>
+        <SheetHeader className="border-b border-gray-200 px-6 py-4 text-left flex-row items-center justify-between">
+          <SheetTitle className="text-sm font-extrabold tracking-wider uppercase">Room Options</SheetTitle>
           <SheetClose asChild>
             <Button
               variant="ghost"
