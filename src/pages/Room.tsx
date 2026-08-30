@@ -50,13 +50,12 @@ const Room = () => {
   const [banned, setBanned] = useState<boolean>(false);
 
   // Sync-gate tracking
-  // hostReady[userId] = true means that user has buffered the current track
   const [hostReady, setHostReady] = useState<boolean>(false);
   const [memberReadyMap, setMemberReadyMap] = useState<Record<string, boolean>>({});
   const [gateOpen, setGateOpen] = useState<boolean>(false);
   const [waitingForReady, setWaitingForReady] = useState<boolean>(false);
 
-  // Audio state - driven by syncScheduler for both host and members
+  // Audio state - driven by syncScheduler
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -152,12 +151,6 @@ const Room = () => {
     });
     return () => unsubscribe();
   }, [myId, userName, isHost]);
-
-  const handleSeek = useCallback((time: number) => {
-    const audioEl = syncScheduler.getAudioElement();
-    audioEl.currentTime = time;
-    setCurrentTime(time);
-  }, []);
 
   const handleToggleMute = useCallback(() => {
     const next = !isMuted;
@@ -536,7 +529,7 @@ const Room = () => {
       return;
     }
     scheduleTrackWithGate(idx, 2000);
-  }, [isHost, scheduleTrackForPlayback]);
+  }, [isHost, scheduleTrackWithGate]);
 
   const handleSeekFromBar = useCallback((time: number) => {
     if (!isHost) {
