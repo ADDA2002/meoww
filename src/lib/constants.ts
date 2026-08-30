@@ -1,3 +1,5 @@
+import type { Track } from "@/types/music";
+
 export const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 export const generateRoomCode = (length: number = 6): string => {
@@ -5,8 +7,6 @@ export const generateRoomCode = (length: number = 6): string => {
     ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]
   ).join("");
 };
-
-import type { Track } from "@/types/music";
 
 export const DEFAULT_TRACKS: Track[] = [
   {

@@ -17,9 +17,10 @@ interface UseAudioPlayerReturn {
   togglePlay: () => void;
   seek: (time: number) => void;
   toggleMute: () => void;
-  setCurrentTime: (time: number) => void;
-  setDuration: (dur: number) => void;
-  setIsPlaying: (playing: boolean) => void;
+  playTrack: (trackIndex: number, seekTime?: number) => void;
+  syncPlay: (trackIndex: number, seekTime: number, timestamp: number) => void;
+  syncPause: (seekTime: number) => void;
+  syncSeek: (seekTime: number) => void;
 }
 
 export function useAudioPlayer({
@@ -40,7 +41,6 @@ export function useAudioPlayer({
 
   const currentTrack = queue[currentIndex] ?? null;
 
-  // Keep refs updated
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
@@ -57,47 +57,52 @@ export function useAudioPlayer({
     isHostRef.current = isHost;
   }, [isHost]);
 
-  // Handle mute
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.muted = isMuted;
     }
   }, [isMuted]);
 
-  // Toggle play/pause
+  const playTrack = useCallback((trackIndex: number, seekTime: number = 0) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const targetUrl = queueRef.current[trackIndex]?.url;
+    if (!targetUrl) return;
+
+    const startPlayback = () => {
+      audio.currentTime = seekTime;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+      }).catch(console.error);
+    };
+
+    if (audio.src !== targetUrl) {
+      audio.src = targetUrl;
+      audio.load();
+      audio.addEventListener("canplay", () => {
+        audio.removeEventListener("canplay", arguments.callee);
+        startPlayback();
+      }, { once: true });
+    } else {
+      startPlayback();
+    }
+  }, []);
+
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (isPlayingRef.current) {
+    if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
       isPlayingRef.current = false;
     } else {
-      const targetUrl = queueRef.current[currentIndexRef.current]?.url;
-      if (!targetUrl) return;
-
-      const startPlayback = () => {
-        audio.play().then(() => {
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-        }).catch(console.error);
-      };
-
-      if (audio.src !== targetUrl) {
-        audio.src = targetUrl;
-        audio.load();
-        audio.addEventListener("canplay", () => {
-          audio.removeEventListener("canplay", arguments.callee);
-          startPlayback();
-        }, { once: true });
-      } else {
-        startPlayback();
-      }
+      playTrack(currentIndexRef.current, audio.currentTime);
     }
-  }, []);
+  }, [isPlaying, playTrack]);
 
-  // Seek to time
   const seek = useCallback((time: number) => {
     const audio = audioRef.current;
     if (audio) {
@@ -105,9 +110,58 @@ export function useAudioPlayer({
     }
   }, []);
 
-  // Toggle mute
   const toggleMute = useCallback(() => {
     setIsMuted(prev => !prev);
+  }, []);
+
+  const syncPlay = useCallback((trackIndex: number, seekTime: number, _timestamp: number) => {
+    if (isHostRef.current) return;
+
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const targetUrl = queueRef.current[trackIndex]?.url;
+    if (!targetUrl) return;
+
+    const startPlayback = () => {
+      audio.currentTime = seekTime;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+      }).catch(console.error);
+    };
+
+    if (audio.src !== targetUrl) {
+      audio.src = targetUrl;
+      audio.load();
+      audio.addEventListener("canplay", () => {
+        audio.removeEventListener("canplay", arguments.callee);
+        startPlayback();
+      }, { once: true });
+    } else {
+      startPlayback();
+    }
+  }, []);
+
+  const syncPause = useCallback((seekTime: number) => {
+    if (isHostRef.current) return;
+
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = seekTime;
+      audio.pause();
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+    }
+  }, []);
+
+  const syncSeek = useCallback((seekTime: number) => {
+    if (isHostRef.current) return;
+
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = seekTime;
+    }
   }, []);
 
   return {
@@ -120,8 +174,9 @@ export function useAudioPlayer({
     togglePlay,
     seek,
     toggleMute,
-    setCurrentTime,
-    setDuration,
-    setIsPlaying,
+    playTrack,
+    syncPlay,
+    syncPause,
+    syncSeek,
   };
 }
