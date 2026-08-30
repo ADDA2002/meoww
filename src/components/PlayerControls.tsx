@@ -29,12 +29,14 @@ export function PlayerControls({
   return (
     <div className="flex items-center justify-center gap-3 pt-2">
       <Button
-        variant="ghost"
+        variant={isShuffle ? "default" : "ghost"}
         size="icon"
         onClick={onToggleShuffle}
         disabled={!isConnected}
         className={`border border-black transition-colors disabled:opacity-50 ${
-          isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
+          isShuffle 
+            ? "bg-black text-white hover:bg-neutral-800 hover:text-white" 
+            : "bg-white text-black hover:bg-gray-100 hover:text-black"
         }`}
       >
         <Shuffle className="w-4 h-4" />
@@ -69,12 +71,14 @@ export function PlayerControls({
       </Button>
       
       <Button
-        variant="ghost"
+        variant={isMuted ? "default" : "ghost"}
         size="icon"
         onClick={onToggleMute}
         disabled={!isConnected}
         className={`border border-black transition-colors disabled:opacity-50 ${
-          isMuted ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
+          isMuted 
+            ? "bg-black text-white hover:bg-neutral-800 hover:text-white" 
+            : "bg-white text-black hover:bg-gray-100 hover:text-black"
         }`}
       >
         {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
