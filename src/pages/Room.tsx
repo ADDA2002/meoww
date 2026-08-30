@@ -450,19 +450,6 @@ const Room = () => {
         }
         break;
       }
-
-      case "HOST_TRANSFER": {
-        if (msg.newHostId === myId) {
-          setIsHost(true);
-          toast.success("You are now the Host of this Jam!");
-        } else {
-          setIsHost(false);
-        }
-        setUsers((prev) =>
-          prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId }))
-        );
-        break;
-      }
     }
   };
 
@@ -728,19 +715,6 @@ const Room = () => {
     });
   };
 
-  const handleTransferHost = (targetUserId: string) => {
-    if (!isHost) return;
-    setIsHost(false);
-    setUsers((prev) =>
-      prev.map((u) => ({ ...u, isHost: u.id === targetUserId }))
-    );
-    broadcast({
-      type: "HOST_TRANSFER",
-      newHostId: targetUserId,
-    });
-    toast.info("Host controls transferred.");
-  };
-
   const handleLeaveRoom = () => {
     navigate("/");
   };
@@ -928,13 +902,6 @@ const Room = () => {
                       <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
                         HOST
                       </span>
-                    ) : isHost ? (
-                      <button
-                        onClick={() => handleTransferHost(user.id)}
-                        className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-neutral-800 transition-colors cursor-pointer"
-                      >
-                        MAKE HOST
-                      </button>
                     ) : (
                       <span className="text-gray-400 text-[10px]">Listener</span>
                     )}
