@@ -77,7 +77,6 @@ export function useFirebaseSync({
         stateUpdates.queue = msg.queue;
         stateUpdates.currentTrackIndex = msg.activeIndex;
       } else if (msg.type === "VETO_TOGGLE") {
-        // Persist veto state in room state so late-joining members see it
         stateUpdates.vetoActive = msg.active;
       }
       

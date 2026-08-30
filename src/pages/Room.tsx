@@ -14,7 +14,6 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { QueueList } from "@/components/QueueList";
 import { UserList } from "@/components/UserList";
 import { ConnectionStatus, OfflineBanner } from "@/components/ConnectionStatus";
-import { VetoControl } from "@/components/VetoControl";
 
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
@@ -144,16 +143,6 @@ const Room = () => {
         if (msg.activeIndex !== undefined) {
           setCurrentIndex(msg.activeIndex);
         }
-        break;
-      }
-      case "HOST_TRANSFER": {
-        if (msg.newHostId === myId) {
-          setIsHost(true);
-          toast.success("You are now the Host!");
-        } else {
-          setIsHost(false);
-        }
-        setUsers((prev) => prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId })));
         break;
       }
       case "VETO_TOGGLE": {
@@ -385,14 +374,6 @@ const Room = () => {
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
   }, [queue, currentIndex, broadcast, requireControlAccess]);
 
-  const handleTransferHost = useCallback((targetUserId: string) => {
-    if (!isHost) return;
-    setIsHost(false);
-    setUsers((prev) => prev.map((u) => ({ ...u, isHost: u.id === targetUserId })));
-    broadcast({ type: "HOST_TRANSFER", newHostId: targetUserId });
-    toast.info("Host transferred.");
-  }, [isHost, broadcast]);
-
   // Host toggles the "Power of Veto"
   const handleToggleVeto = useCallback(() => {
     if (!isHost) return;
@@ -523,7 +504,6 @@ const Room = () => {
             users={users}
             myId={myId}
             isHost={isHost}
-            onTransferHost={handleTransferHost}
           />
 
           <QueueList
