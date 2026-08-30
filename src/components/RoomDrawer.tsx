@@ -46,14 +46,14 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
       <SheetContent 
         className="border-l border-black bg-white text-black rounded-none p-0 [&>button]:hidden"
       >
-        <SheetHeader className="border-b border-gray-200 py-3 px-4 sm:px-8 text-left flex-row items-center justify-between">
+        <SheetHeader className="border-b border-gray-200 px-6 py-4 text-left flex-row items-center justify-between">
           <SheetTitle className="text-sm font-extrabold tracking-wider uppercase">Room Options</SheetTitle>
           <SheetClose className="p-1 hover:bg-gray-100 transition-colors rounded-sm">
             <X className="w-5 h-5" />
           </SheetClose>
         </SheetHeader>
         
-        <div className="p-4 space-y-6">
+        <div className="p-6 space-y-6">
           {/* Room Code Section */}
           <div className="space-y-3">
             <div className="text-xs font-mono uppercase text-gray-500 tracking-wider">Room Code</div>
