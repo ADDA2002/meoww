@@ -33,7 +33,6 @@ import {
 import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
-import { PEER_CONFIG } from "@/lib/peerConfig";
 import RoomDrawer from "@/components/RoomDrawer";
 
 const Room = () => {
@@ -98,10 +97,11 @@ const Room = () => {
 
     const measurePing = () => {
       const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-      const testPeer = new Peer({ ...PEER_CONFIG });
+      const testPeer = new Peer(`${myId}-ping-${Date.now()}`, { debug: 0 });
       
       const timeout = setTimeout(() => {
         try { testPeer.destroy(); } catch (e) { /* noop */ }
+        // Use last known ping or show dash
         setPing((prev) => prev || 0);
       }, 2000);
 
@@ -152,13 +152,17 @@ const Room = () => {
 
   // Generate a unique name by adding a number suffix with a space if there's a conflict
   const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
+    // Always store the comparison name in formatted form (first capital, rest lowercase)
     const normalizedBase = baseName.trim().toLowerCase();
     const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
     
+    // Check if base name already exists
     if (!existingNames.includes(normalizedBase)) {
       return baseName;
     }
     
+    // Try adding numbers at the end with a space until we find a unique one
+    // e.g., "Alex" becomes "Alex 1", "Alex 2", etc.
     for (let i = 1; i <= 999; i++) {
       const candidate = baseName + " " + i;
       if (!existingNames.includes(candidate.toLowerCase())) {
@@ -166,6 +170,7 @@ const Room = () => {
       }
     }
     
+    // Fallback: add timestamp suffix
     return baseName + " " + Date.now();
   };
 
@@ -173,14 +178,17 @@ const Room = () => {
   useEffect(() => {
     if (!roomCode) return;
 
+    // A deterministic peer ID for the host so others can join, and random for listeners
     const generatedId = isHost 
       ? `meoww-room-${roomCode.toLowerCase()}` 
       : `meoww-user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
     setMyId(generatedId);
 
+    // Generate unique name if needed (only for non-hosts joining)
     const finalName = isHost ? userName : generateUniqueName(userName, []);
     
+    // Update the displayed name if it changed
     if (finalName !== userName) {
       setUserName(finalName);
     }
@@ -194,15 +202,16 @@ const Room = () => {
 
     setUsers([currentUser]);
 
-    const peer = new Peer(generatedId, PEER_CONFIG);
+    const peer = new Peer(generatedId, {
+      debug: 1,
+    });
     peerRef.current = peer;
-
-    let networkErrorToastShown = false;
 
     peer.on("open", (id) => {
       setIsConnected(true);
       
       if (!isHost) {
+        // Connect to host peer
         const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
         const conn = peer.connect(hostPeerId, { reliable: true });
         setupConnection(conn, currentUser);
@@ -214,28 +223,13 @@ const Room = () => {
     });
 
     peer.on("error", (err: any) => {
-      console.warn("PeerJS error:", err.type, err);
+      console.warn("PeerJS error:", err);
       if (err.type === "unavailable-id" && isHost) {
         toast.error("Room host already active. Joining as listener.");
         setIsHost(false);
-      } else if (err.type === "network" || err.type === "server-error" || err.type === "socket-error" || err.type === "socket-closed") {
-        if (!networkErrorToastShown) {
-          networkErrorToastShown = true;
-          toast.error("Connection lost to signaling server. Retrying...");
-        }
-      } else if (err.type === "peer-unavailable") {
-        // Expected when room doesn't exist
       } else {
         toast.error("Connection notice: " + (err.message || "Working in local mode."));
       }
-    });
-
-    peer.on("disconnected", () => {
-      console.warn("PeerJS disconnected from broker. Attempting reconnect...");
-      // Try to reconnect to the broker
-      setTimeout(() => {
-        try { peer.reconnect(); } catch (e) { /* noop */ }
-      }, 2000);
     });
 
     return () => {
@@ -246,18 +240,24 @@ const Room = () => {
   // Connection data handler
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
     conn.on("open", () => {
+      // If this connection is from a listener trying to join the host
       if (isHostRef.current) {
+        // Check for duplicate name (case-insensitive) and generate unique name
         const uniqueName = generateUniqueName(me.name, usersRef.current);
         const updatedUser = { ...me, name: uniqueName };
 
+        // If name was changed, notify the user
         if (uniqueName !== me.name) {
+          // Send the updated user info with the new name
           connectionsRef.current.set(conn.peer, conn);
           
+          // Send JOIN with the unique name
           conn.send({
             type: "JOIN",
             user: updatedUser,
           });
           
+          // Send notification to the user about their new name
           conn.send({
             type: "NAME_UPDATE",
             newName: uniqueName,
@@ -269,11 +269,13 @@ const Room = () => {
 
         connectionsRef.current.set(conn.peer, conn);
 
+        // If listener connecting to host, announce self
         conn.send({
           type: "JOIN",
           user: me,
         });
 
+        // If host, send current state to the new listener
         if (isHostRef.current) {
           const audio = audioRef.current;
           const currentSeek = audio ? audio.currentTime : 0;
@@ -301,6 +303,7 @@ const Room = () => {
       } else {
         connectionsRef.current.set(conn.peer, conn);
         
+        // If listener connecting to host, announce self
         conn.send({
           type: "JOIN",
           user: me,
@@ -322,12 +325,14 @@ const Room = () => {
   const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
     switch (msg.type) {
       case "NAME_UPDATE": {
+        // Update our displayed name if the host assigned us a new one
         setUserName(msg.newName);
         toast.info(`Your name was updated to "${msg.newName}" because "${msg.originalName}" was taken.`);
         break;
       }
 
       case "JOIN": {
+        // If we're the host, do a final duplicate check before adding
         if (isHostRef.current) {
           const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
           const updatedUser = { ...msg.user, name: uniqueName };
@@ -337,6 +342,7 @@ const Room = () => {
           setUsers(updatedUsers);
           
           if (uniqueName !== msg.user.name) {
+            // Notify the user about the name change
             const conn = connectionsRef.current.get(senderPeerId);
             if (conn && conn.open) {
               conn.send({
@@ -382,6 +388,7 @@ const Room = () => {
         const audio = audioRef.current;
         if (!audio) return;
 
+        // Millisecond accurate sync compensation
         const latencySec = (Date.now() - msg.timestamp) / 1000;
         const targetTime = msg.seekTime + latencySec;
 
@@ -448,6 +455,7 @@ const Room = () => {
 
     const wasHost = usersRef.current.find((u) => u.id === disconnectedId)?.isHost;
     if (wasHost && remainingUsers.length > 0) {
+      // Pick the next earliest joined participant
       const sorted = [...remainingUsers].sort((a, b) => a.joinedAt - b.joinedAt);
       const nextHost = sorted[0];
 
@@ -618,6 +626,7 @@ const Room = () => {
     newQueue[idx] = newQueue[targetIdx];
     newQueue[targetIdx] = temp;
 
+    // update active index if needed
     let newActive = currentIndex;
     if (currentIndex === idx) {
       newActive = targetIdx;
