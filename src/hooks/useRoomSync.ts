@@ -30,19 +30,20 @@ export function useRoomSync({
   onNameUpdate,
   broadcast,
 }: UseRoomSyncOptions) {
-  const usersRef = useRef(users);
-  const queueRef = useRef(queue);
-  const currentIndexRef = useRef(currentIndex);
+  const usersRef = useRef<RoomUser[]>(users);
+  const queueRef = useRef<Track[]>(queue);
+  const currentIndexRef = useRef<number>(currentIndex);
 
-  useRef(() => {
+  // Keep refs in sync with latest state
+  useCallback(() => {
     usersRef.current = users;
-  });
-  useRef(() => {
+  }, [users]);
+  useCallback(() => {
     queueRef.current = queue;
-  });
-  useRef(() => {
+  }, [queue]);
+  useCallback(() => {
     currentIndexRef.current = currentIndex;
-  });
+  }, [currentIndex]);
 
   // Handle incoming messages
   const handleMessage = useCallback((msg: SyncMessage, _senderId: string) => {
@@ -55,12 +56,14 @@ export function useRoomSync({
         const existingUser = usersRef.current.find(u => u.id === msg.user.id);
         if (!existingUser) {
           const updatedUsers = [...usersRef.current, msg.user];
+          usersRef.current = updatedUsers;
           onUsersChange(updatedUsers);
         }
         break;
       }
 
       case "USER_LIST":
+        usersRef.current = msg.users;
         onUsersChange(msg.users);
         break;
 
@@ -77,6 +80,8 @@ export function useRoomSync({
         break;
 
       case "UPDATE_QUEUE":
+        queueRef.current = msg.queue;
+        currentIndexRef.current = msg.activeIndex;
         onQueueChange(msg.queue, msg.activeIndex);
         break;
     }
@@ -86,29 +91,26 @@ export function useRoomSync({
   const generateUniqueName = useCallback((baseName: string, existingUsers: RoomUser[]): string => {
     const normalizedBase = baseName.trim().toLowerCase();
     const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
-    
+
     if (!existingNames.includes(normalizedBase)) {
       return baseName;
     }
-    
+
     for (let i = 1; i <= 999; i++) {
       const candidate = baseName + " " + i;
       if (!existingNames.includes(candidate.toLowerCase())) {
         return candidate;
       }
     }
-    
+
     return baseName + " " + Date.now();
   }, []);
 
   // Broadcast current state to new peer (host only)
-  const syncStateToPeer = useCallback((peerId: string, _conn: any) => {
+  const syncStateToPeer = useCallback((_peerId: string) => {
     if (!isHost) return;
 
-    // Send current users
     broadcast({ type: "USER_LIST", users: usersRef.current });
-
-    // Send current queue
     broadcast({ type: "UPDATE_QUEUE", queue: queueRef.current, activeIndex: currentIndexRef.current });
   }, [isHost, broadcast]);
 
