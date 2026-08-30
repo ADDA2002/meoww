@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
-import { formatDisplayName } from "@/utils/nameFormat";
-import { checkFirebaseRoomExists } from "@/services/firebaseRoomCheck";
+import { formatDisplayName } from "@/lib/nameFormat";
+import { checkFirebaseRoomExists } from "@/lib/firebaseRoomCheck";
 
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -49,7 +49,7 @@ const SpinningDigit = ({ char, direction, delay }: { char: string; direction: "u
 
   return (
     <span
-      className={`inline-block w-5 text-center transition-all duration-300 ${
+      className={`inline-block w-4 text-center transition-all duration-300 ${
         isSpinning ? "opacity-50" : "opacity-100"
       }`}
       style={{
@@ -85,7 +85,7 @@ const CyclingCodePlaceholder = () => {
 
   const currentCode = codes[currentIndex];
   return (
-    <span className="inline-block text-lg">
+    <span className="inline-block">
       {currentCode.split("").map((char, i) => (
         <SpinningDigit key={i} char={char} direction={directions[i]} delay={i * 200} />
       ))}
@@ -227,10 +227,10 @@ const Index = () => {
                     <div className="relative">
                       <Input id="join-code" value={joinCode} onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setJoinError(null); }}
                         placeholder="" maxLength={6}
-                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-[0.5em] placeholder-gray-400 focus:border-black text-lg pl-4 pr-12" />
+                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold pr-12" />
                       {!joinCode && (
-                        <div className="absolute inset-0 flex items-center pl-4 pointer-events-none overflow-hidden">
-                          <span className="text-gray-400 font-mono tracking-[0.5em] text-lg">
+                        <div className="absolute inset-0 flex items-center pl-3 pointer-events-none overflow-hidden">
+                          <span className="text-gray-400 font-mono tracking-widest text-sm">
                             <CyclingCodePlaceholder />
                           </span>
                         </div>

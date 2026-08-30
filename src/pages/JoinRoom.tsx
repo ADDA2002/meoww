@@ -3,8 +3,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import Header from "@/components/Header";
-import { checkFirebaseRoomExists } from "@/services/firebaseRoomCheck";
-import { formatDisplayName } from "@/utils/nameFormat";
+import { checkFirebaseRoomExists } from "@/lib/firebaseRoomCheck";
+import { formatDisplayName } from "@/lib/nameFormat";
 
 const JoinRoom = () => {
   const [userName, setUserName] = useState("");
