@@ -30,18 +30,16 @@ type SchedulerListener = (tracks: ScheduledTrack[]) => void;
 class SyncScheduler {
   private tracks: Map<string, ScheduledTrack> = new Map();
   private listeners: SchedulerListener[] = [];
-  private audioElement: HTMLAudioElement;
+  private audioElement: HTMLAudioElement | null = null;
   private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private activeTrackId: string | null = null;
 
   constructor() {
-    // Create a single shared audio element upfront
+    // Create a single shared audio element
     if (typeof window !== "undefined") {
       this.audioElement = new Audio();
       this.audioElement.preload = "auto";
       console.log("[SyncScheduler] Audio element created");
-    } else {
-      this.audioElement = null as any;
     }
   }
 
@@ -153,11 +151,6 @@ class SyncScheduler {
       return;
     }
 
-    // CRITICAL: If audio element is paused (e.g., host pressed pause), don't trigger playback
-    if (this.audioElement.paused) {
-      return;
-    }
-
     if (!syncedClock.isReady()) {
       return; // Clock not ready, skip this check
     }
@@ -198,12 +191,6 @@ class SyncScheduler {
 
     if (!scheduled.blobUrl) {
       console.error("[SyncScheduler] ❌ triggerPlayback called but blobUrl is undefined!");
-      return;
-    }
-
-    // DOUBLE-CHECK: Don't trigger if audio is paused
-    if (this.audioElement.paused) {
-      console.log("[SyncScheduler] ⏸️ Audio is paused, not triggering playback");
       return;
     }
 
@@ -254,6 +241,11 @@ class SyncScheduler {
    * Get the audio element (for UI controls to attach to).
    */
   getAudioElement(): HTMLAudioElement {
+    if (!this.audioElement) {
+      console.warn("[SyncScheduler] Audio element was null, creating new one");
+      this.audioElement = new Audio();
+      this.audioElement.preload = "auto";
+    }
     return this.audioElement;
   }
 
