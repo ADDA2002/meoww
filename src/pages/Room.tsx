@@ -53,15 +53,25 @@ const Room = () => {
   const currentTrack = queue[currentIndex] || null;
 
   // Broadcast current state to Firebase
-  const broadcastState = useCallback((extra?: Partial<FirebaseSyncState>) => {
+  // Pass explicit isPlaying instead of reading from audio.paused (which lags behind React state)
+  const broadcastState = useCallback((extra?: Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean }) => {
     const audio = audioRef.current;
     if (!audio) return;
+
+    // Use explicit value if provided, otherwise read from audio element
+    const playing = extra?.explicitIsPlaying !== undefined
+      ? extra.explicitIsPlaying
+      : !audio.paused;
+
+    // Remove the explicitIsPlaying key before spreading into update
+    const { explicitIsPlaying, ...rest } = extra || {};
+
     updatePlaybackStateRef.current?.({
       currentTrackIndex: currentIndexRef.current,
       queue: queueRef.current,
-      isPlaying: !audio.paused,
+      isPlaying: playing,
       currentTime: audio.currentTime,
-      ...extra,
+      ...rest,
     });
   }, []);
 
@@ -86,8 +96,9 @@ const Room = () => {
 
     audio.play().catch(console.error);
 
-    // Immediate broadcast on track change
-    broadcastState({ currentTrackIndex: idx });
+    // Immediate broadcast — explicitly pass isPlaying=true since audio.play()
+    // fires async and React's isPlaying state hasn't updated yet
+    broadcastState({ currentTrackIndex: idx, explicitIsPlaying: true });
   }, [broadcastState]);
 
   // Handle state changes from Firebase (member side only)
@@ -277,20 +288,24 @@ const Room = () => {
     return () => clearInterval(interval);
   }, [isHost]);
 
-  // Toggle play/pause — immediate broadcast
+  // Toggle play/pause — immediate broadcast with explicit isPlaying
   const handleTogglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !audio.src) return;
 
+    let willBePlaying: boolean;
+
     if (!audio.paused) {
       audio.pause();
+      willBePlaying = false;
     } else {
       audio.play().catch(console.error);
+      willBePlaying = true;
     }
 
-    // Immediate broadcast
+    // Broadcast immediately with the correct playing state
     updatePlaybackStateRef.current?.({
-      isPlaying: !audio.paused,
+      isPlaying: willBePlaying,
       currentTime: audio.currentTime,
     });
   }, []);
