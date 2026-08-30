@@ -20,9 +20,7 @@ const Header = ({ showRoomOptions = false }) => {
           />
           <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
         </div>
-        
-        {/* Room options button - only show on room page or when explicitly requested */}
-        {(showRoomOptions || isRoomPage) ? (
+        {(showRoomOptions || isRoomPage) && (
           <button
             onClick={() => {
               // This will be handled by the RoomDrawer in the Room page
@@ -34,13 +32,6 @@ const Header = ({ showRoomOptions = false }) => {
           >
             <Menu className="w-4 h-4 text-gray-600 hover:text-black transition-colors" />
           </button>
-        ) : (
-          <a
-            href="/"
-            className="hidden sm:block bg-gray-100 px-4 py-1 rounded text-sm text-gray-600 hover:bg-gray-200 transition-colors"
-          >
-            Home
-          </a>
         )}
       </div>
     </header>

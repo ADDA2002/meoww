@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Radio } from "lucide-react";
 import Peer from "peerjs";
 import { formatDisplayName } from "@/lib/nameFormat";
 import Header from "@/components/Header";
@@ -125,6 +125,16 @@ const Index = () => {
   const [joinError, setJoinError] = useState<string | null>(null);
   const [isCheckingRoom, setIsCheckingRoom] = useState(false);
 
+  const handleTabClick = (tab: "create" | "join") => {
+    if (activeTab === tab) {
+      setActiveTab(null);
+      setJoinError(null);
+    } else {
+      setActiveTab(tab);
+      setJoinError(null);
+    }
+  };
+
   // Validate that the room code has the correct format
   const isValidCodeFormat = (code: string) => {
     return /^[A-Z0-9]{6}$/.test(code.trim().toUpperCase());
@@ -145,7 +155,6 @@ const Index = () => {
       }, 6000);
 
       checkPeer.on("open", () => {
-        // Try connecting to the host — if it errors with peer-unavailable, room doesn't exist
         const conn = checkPeer.connect(hostPeerId, { reliable: true });
 
         const settle = (result: boolean) => {
@@ -162,7 +171,6 @@ const Index = () => {
           }
         });
 
-        // Safety fallback in case neither event fires
         setTimeout(() => settle(false), 5000);
       });
 
@@ -172,7 +180,6 @@ const Index = () => {
           try { checkPeer.destroy(); } catch (e) { /* noop */ }
           resolve(false);
         }
-        // For other errors (network/server down), let timeout handle it
       });
     });
   };
@@ -220,11 +227,11 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
-      {/* Home screen header - shows logo and Meoww only */}
+      {/* Single consistent header - just logo and Meoww */}
       <Header />
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20">
+      <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-20 pt-20">
         <div className="w-full max-w-xl">
           {/* Tab Strip + Curtain Drawers */}
           <div 
@@ -325,7 +332,7 @@ const Index = () => {
                         }}
                         placeholder=""
                         maxLength={6}
-                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold drawer-input"
+                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold pr-12"
                       />
                       {/* Animated placeholder overlay */}
                       {!joinCode && (
