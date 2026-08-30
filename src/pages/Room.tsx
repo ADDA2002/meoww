@@ -14,7 +14,6 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { QueueList } from "@/components/QueueList";
 import { UserList } from "@/components/UserList";
 import { ConnectionStatus, OfflineBanner } from "@/components/ConnectionStatus";
-import { SyncStatusPanel } from "@/components/SyncStatusPanel";
 
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
@@ -634,8 +633,6 @@ const Room = () => {
               onToggleMute={handleToggleMute}
             />
           </div>
-
-          <SyncStatusPanel isHost={isHost} />
         </div>
 
         <div className="lg:col-span-5 space-y-6">
