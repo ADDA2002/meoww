@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
 import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
@@ -38,13 +37,8 @@ const Room = () => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
 
-  // Veto - default ON (add-only mode)
-  const [vetoActive, setVetoActive] = useState<boolean>(true);
-
   // Session state
   const [sessionEnded, setSessionEnded] = useState<boolean>(false);
-  const [kicked, setKicked] = useState<boolean>(false);
-  const [banned, setBanned] = useState<boolean>(false);
 
   // Audio state
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -56,17 +50,13 @@ const Room = () => {
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
-  const vetoActiveRef = useRef(vetoActive);
-  const lastVetoToastRef = useRef<boolean | null>(null);
   const isInitializedRef = useRef(false);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
   isShuffleRef.current = isShuffle;
-  vetoActiveRef.current = vetoActive;
 
   const currentTrack = queue[currentIndex] || null;
-  const controlsLocked = !isHost && vetoActive;
 
   // Initialize audio element
   useEffect(() => {
@@ -80,7 +70,7 @@ const Room = () => {
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
       setIsPlaying(false);
-      if (isHost && queueRef.current.length > 0) {
+      if (queueRef.current.length > 0) {
         const nextIdx = isShuffleRef.current
           ? Math.floor(Math.random() * queueRef.current.length)
           : (currentIndexRef.current + 1) % queueRef.current.length;
@@ -103,7 +93,7 @@ const Room = () => {
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("ended", handleEnded);
     };
-  }, [isHost]);
+  }, []);
 
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -153,31 +143,16 @@ const Room = () => {
     });
   }, []);
 
-  // Handle state changes from Firebase (for non-host members)
+  // Handle state changes from Firebase
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     console.log(`[Room] State change:`, JSON.stringify(state, null, 2));
     
-    if (isHost) return; // Host is the source of truth
-    
     const newIndex = state.currentTrackIndex ?? 0;
     const newQueue = state.queue || [];
-    const newVetoActive = state.vetoActive ?? true;
     const newIsPlaying = state.isPlaying ?? false;
     
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
       setQueue(newQueue);
-    }
-    
-    if (newVetoActive !== vetoActiveRef.current) {
-      setVetoActive(newVetoActive);
-      if (lastVetoToastRef.current !== null) {
-        if (newVetoActive) {
-          toast("Host restricted controls. You can add songs only.", { icon: "🔒" });
-        } else {
-          toast("Host restored member controls.", { icon: "🔓" });
-        }
-      }
-      lastVetoToastRef.current = newVetoActive;
     }
     
     // Sync playback state
@@ -199,7 +174,7 @@ const Room = () => {
     }
 
     setCurrentIndex(newIndex);
-  }, [isHost]);
+  }, []);
 
   // Handle instant messages
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
@@ -209,36 +184,14 @@ const Room = () => {
       case "USER_LIST":
         setUsers(msg.users);
         break;
-        
-      case "KICK_USER": {
-        if (msg.targetId === myId) {
-          setKicked(true);
-          toast.error(`You have been kicked by the host${msg.reason ? `: ${msg.reason}` : ""}`);
-        } else {
-          toast.info(`${msg.targetName} has been kicked.`);
-          setUsers(prev => prev.filter(u => u.id !== msg.targetId));
-        }
-        break;
-      }
-      
-      case "BAN_USER": {
-        if (msg.targetId === myId) {
-          setBanned(true);
-          toast.error(`You have been banned from this session${msg.reason ? `: ${msg.reason}` : ""}`);
-        } else {
-          toast.info(`${msg.targetName} has been banned.`);
-          setUsers(prev => prev.filter(u => u.id !== msg.targetId));
-        }
-        break;
-      }
     }
-  }, [myId]);
+  }, []);
 
   const handleSessionEnded = useCallback(() => {
     setSessionEnded(true);
   }, []);
 
-  const { isConnected, broadcast, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
+  const { isConnected, broadcast, updatePlaybackState, getUsers, getState } = useFirebaseSync({
     roomCode,
     myId,
     userName,
@@ -277,10 +230,6 @@ const Room = () => {
         if (state) {
           if (state.queue && state.queue.length > 0) setQueue(state.queue);
           if (state.currentTrackIndex !== undefined) setCurrentIndex(state.currentTrackIndex);
-          if (state.vetoActive !== undefined) {
-            setVetoActive(state.vetoActive);
-            lastVetoToastRef.current = state.vetoActive;
-          }
 
           // Sync audio state
           const audio = audioRef.current;
@@ -307,11 +256,6 @@ const Room = () => {
   const handleTogglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !audio.src) return;
-
-    if (!isHost) {
-      toast.error("Only the host can control playback.");
-      return;
-    }
     
     if (!audio.paused) {
       audio.pause();
@@ -320,13 +264,9 @@ const Room = () => {
       audio.play().catch(console.error);
       updatePlaybackStateRef.current?.({ isPlaying: true });
     }
-  }, [isHost]);
+  }, []);
 
   const handleNext = useCallback(() => {
-    if (!isHost) {
-      toast.error("Only the host can control playback.");
-      return;
-    }
     if (queueRef.current.length === 0) return;
     
     const nextIdx = isShuffleRef.current
@@ -334,13 +274,9 @@ const Room = () => {
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
     handlePlayTrack(nextIdx);
-  }, [isHost, isShuffle, handlePlayTrack]);
+  }, [handlePlayTrack]);
 
   const handlePrevious = useCallback(() => {
-    if (!isHost) {
-      toast.error("Only the host can control playback.");
-      return;
-    }
     if (queueRef.current.length === 0) return;
     
     const prevIdx = isShuffleRef.current
@@ -348,26 +284,18 @@ const Room = () => {
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
     handlePlayTrack(prevIdx);
-  }, [isHost, isShuffle, handlePlayTrack]);
+  }, [handlePlayTrack]);
 
   const handleTrackClick = useCallback((idx: number) => {
-    if (!isHost) {
-      toast.error("Only the host can control playback.");
-      return;
-    }
     handlePlayTrack(idx);
-  }, [isHost, handlePlayTrack]);
+  }, [handlePlayTrack]);
 
   const handleSeekFromBar = useCallback((time: number) => {
-    if (!isHost) {
-      toast.error("Only the host can control playback.");
-      return;
-    }
     if (audioRef.current) {
       audioRef.current.currentTime = time;
       updatePlaybackStateRef.current?.({ currentTime: time });
     }
-  }, [isHost]);
+  }, []);
 
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
@@ -385,8 +313,7 @@ const Room = () => {
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
     });
-    toast.success("Track added!");
-  }, [userName, isHost]);
+  }, [userName]);
 
   const handleLocalFileUpload = useCallback((file: File) => {
     const fileUrl = URL.createObjectURL(file);
@@ -406,19 +333,9 @@ const Room = () => {
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
     });
-    toast.success(`Loaded: ${file.name}`);
-  }, [userName, isHost]);
+  }, [userName]);
 
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
-    if (!isHost) {
-      if (controlsLocked) {
-        toast.error("Host has restricted member controls.");
-        return;
-      }
-      toast.error("Only the host can reorder the queue.");
-      return;
-    }
-    
     if (direction === "up" && idx === 0) return;
     if (direction === "down" && idx === queueRef.current.length - 1) return;
 
@@ -437,18 +354,10 @@ const Room = () => {
       queue: newQueue,
       currentTrackIndex: newActive,
     });
-  }, [isHost, controlsLocked]);
+  }, []);
 
   const handleRemoveTrack = useCallback((idx: number) => {
-    if (!isHost) {
-      toast.error("Only the host can remove tracks.");
-      return;
-    }
-    
-    if (queueRef.current.length <= 1) {
-      toast.error("Queue must have at least one track.");
-      return;
-    }
+    if (queueRef.current.length <= 1) return;
     const newQueue = queueRef.current.filter((_, i) => i !== idx);
     let newActive = currentIndexRef.current;
     if (idx < currentIndexRef.current) newActive = currentIndexRef.current - 1;
@@ -461,32 +370,7 @@ const Room = () => {
       queue: newQueue,
       currentTrackIndex: newActive,
     });
-  }, [isHost]);
-
-  const handleToggleVeto = useCallback(() => {
-    if (!isHost) return;
-    const next = !vetoActiveRef.current;
-    setVetoActive(next);
-    vetoActiveRef.current = next;
-    
-    toast.success(next ? "Member controls locked." : "Member controls restored.");
-    
-    updatePlaybackStateRef.current?.({
-      vetoActive: next,
-    });
-  }, [isHost]);
-
-  const handleKickUser = useCallback((targetId: string, targetName: string) => {
-    if (!isHost) return;
-    kickUser(targetId, targetName);
-    toast.info(`Kicked ${targetName}.`);
-  }, [isHost, kickUser]);
-
-  const handleBanUser = useCallback((targetId: string, targetName: string) => {
-    if (!isHost) return;
-    banUser(targetId, targetName);
-    toast.info(`Banned ${targetName}.`);
-  }, [isHost, banUser]);
+  }, []);
 
   const handleLeaveRoom = () => {
     navigate("/");
@@ -523,52 +407,6 @@ const Room = () => {
     );
   }
 
-  if (kicked) {
-    return (
-      <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
-        <div className="max-w-md text-center space-y-6">
-          <div className="w-20 h-20 mx-auto bg-amber-100 border-2 border-amber-400 flex items-center justify-center">
-            <Radio className="w-10 h-10 text-amber-600" />
-          </div>
-          
-          <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight uppercase">You Have Been Kicked</h1>
-            <p className="text-gray-600 font-mono text-sm">
-              The host has removed you from this session.
-            </p>
-          </div>
-
-          <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
-            Return to Home
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (banned) {
-    return (
-      <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
-        <div className="max-w-md text-center space-y-6">
-          <div className="w-20 h-20 mx-auto bg-red-100 border-2 border-red-400 flex items-center justify-center">
-            <Radio className="w-10 h-10 text-red-600" />
-          </div>
-          
-          <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight uppercase text-red-600">You Have Been Banned</h1>
-            <p className="text-gray-600 font-mono text-sm">
-              The host has permanently banned you from this session.
-            </p>
-          </div>
-
-          <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
-            Return to Home
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
@@ -581,14 +419,7 @@ const Room = () => {
           <RoomDrawer 
             roomCode={roomCode} 
             userName={userName} 
-            isHost={isHost}
-            vetoActive={vetoActive}
-            users={users}
-            myId={myId}
-            onToggleVeto={handleToggleVeto}
             onLeave={handleLeaveRoom}
-            onKickUser={handleKickUser}
-            onBanUser={handleBanUser}
           />
         </div>
       </header>
@@ -615,7 +446,6 @@ const Room = () => {
               duration={duration}
               isHost={isHost}
               isConnected={isConnected}
-              controlsLocked={controlsLocked}
               onSeek={handleSeekFromBar}
             />
 
@@ -625,7 +455,6 @@ const Room = () => {
               isMuted={isMuted}
               isHost={isHost}
               isConnected={isConnected}
-              controlsLocked={controlsLocked}
               onTogglePlay={handleTogglePlay}
               onNext={handleNext}
               onPrevious={handlePrevious}
@@ -646,7 +475,6 @@ const Room = () => {
             queue={queue}
             currentIndex={currentIndex}
             isHost={isHost}
-            controlsLocked={controlsLocked}
             onTrackClick={handleTrackClick}
             onReorder={handleReorder}
             onRemove={handleRemoveTrack}

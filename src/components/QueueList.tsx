@@ -1,4 +1,4 @@
-import { ArrowUp, ArrowDown, Trash2, Plus, Upload, Lock } from "lucide-react";
+import { ArrowUp, ArrowDown, Trash2, Plus, Upload } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,6 @@ interface QueueListProps {
   queue: Track[];
   currentIndex: number;
   isHost: boolean;
-  controlsLocked?: boolean;
   onTrackClick: (idx: number) => void;
   onReorder: (idx: number, direction: "up" | "down") => void;
   onRemove: (idx: number) => void;
@@ -28,7 +27,6 @@ export function QueueList({
   queue,
   currentIndex,
   isHost,
-  controlsLocked = false,
   onTrackClick,
   onReorder,
   onRemove,
@@ -39,10 +37,6 @@ export function QueueList({
   const [songTitle, setSongTitle] = useState("");
   const [songArtist, setSongArtist] = useState("");
   const [songUrl, setSongUrl] = useState("");
-
-  // Non-host members are locked out of queue management when veto is active.
-  // They can still add songs (that's the whole point of "add-only" mode).
-  const memberLocked = !isHost && controlsLocked;
 
   const handleAddSong = (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,15 +60,7 @@ export function QueueList({
   return (
     <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
       <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-xs uppercase tracking-wider">Queue ({queue.length})</span>
-          {memberLocked && (
-            <span className="text-[10px] font-mono uppercase text-amber-700 flex items-center gap-1">
-              <Lock className="w-3 h-3" />
-              Add-only
-            </span>
-          )}
-        </div>
+        <span className="font-bold text-xs uppercase tracking-wider">Queue ({queue.length})</span>
         <Dialog open={addSongOpen} onOpenChange={setAddSongOpen}>
           <DialogTrigger asChild>
             <Button size="sm" className="bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold px-3 py-1">
@@ -130,42 +116,35 @@ export function QueueList({
               }`}
             >
               <div 
-                onClick={() => {
-                  // Non-host members in veto mode cannot switch tracks
-                  if (memberLocked) return;
-                  onTrackClick(idx);
-                }} 
-                className={`min-w-0 flex-1 ${memberLocked ? "cursor-not-allowed" : "cursor-pointer"}`}
+                onClick={() => onTrackClick(idx)} 
+                className="min-w-0 flex-1 cursor-pointer"
               >
                 <p className="font-bold text-xs truncate">{idx + 1}. {track.title}</p>
                 <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>{track.artist}</p>
               </div>
               
-              {/* Queue management controls: hidden for non-host members in veto mode */}
-              {!memberLocked && (
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => onReorder(idx, "up")}
-                    disabled={idx === 0}
-                    className={`p-1 border text-xs disabled:opacity-30 ${isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"}`}
-                  >
-                    <ArrowUp className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => onReorder(idx, "down")}
-                    disabled={idx === queue.length - 1}
-                    className={`p-1 border text-xs disabled:opacity-30 ${isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"}`}
-                  >
-                    <ArrowDown className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => onRemove(idx)}
-                    className={`p-1 border text-xs text-red-500 hover:bg-red-50 ${isCurrent ? "border-white" : "border-gray-300"}`}
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onReorder(idx, "up")}
+                  disabled={idx === 0}
+                  className={`p-1 border text-xs disabled:opacity-30 ${isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"}`}
+                >
+                  <ArrowUp className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => onReorder(idx, "down")}
+                  disabled={idx === queue.length - 1}
+                  className={`p-1 border text-xs disabled:opacity-30 ${isCurrent ? "border-white hover:bg-neutral-800" : "border-gray-300 hover:bg-gray-100"}`}
+                >
+                  <ArrowDown className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => onRemove(idx)}
+                  className={`p-1 border text-xs text-red-500 hover:bg-red-50 ${isCurrent ? "border-white" : "border-gray-300"}`}
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
             </div>
           );
         })}

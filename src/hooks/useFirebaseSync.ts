@@ -57,14 +57,6 @@ export function useFirebaseSync({
     signalingRef.current?.updateState(updates);
   }, [isHost]);
 
-  const kickUser = useCallback((targetId: string, targetName: string, reason?: string) => {
-    broadcast({ type: "KICK_USER", targetId, targetName, reason });
-  }, [broadcast]);
-
-  const banUser = useCallback((targetId: string, targetName: string, reason?: string) => {
-    broadcast({ type: "BAN_USER", targetId, targetName, reason });
-  }, [broadcast]);
-
   const getUsers = useCallback(async () => {
     return signalingRef.current?.getUsers() || [];
   }, []);
@@ -77,8 +69,6 @@ export function useFirebaseSync({
     isConnected,
     broadcast,
     updatePlaybackState,
-    kickUser,
-    banUser,
     getUsers,
     getState,
   };

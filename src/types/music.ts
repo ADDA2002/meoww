@@ -17,6 +17,4 @@ export interface RoomUser {
 }
 
 export type SyncMessage =
-  | { type: "USER_LIST"; users: RoomUser[] }
-  | { type: "KICK_USER"; targetId: string; targetName: string; reason?: string }
-  | { type: "BAN_USER"; targetId: string; targetName: string; reason?: string };
+  | { type: "USER_LIST"; users: RoomUser[] };

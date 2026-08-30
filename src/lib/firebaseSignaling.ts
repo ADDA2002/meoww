@@ -8,7 +8,6 @@ export interface FirebaseSyncState {
   isPlaying: boolean;
   currentTime: number;
   queue: Track[];
-  vetoActive?: boolean;
   lastUpdateId: string;
   lastUpdated: number;
 }
@@ -88,7 +87,6 @@ class FirebaseSignaling {
               isPlaying: false,
               currentTime: 0,
               queue: [],
-              vetoActive: true,
               lastUpdateId: `init-${Date.now()}`,
               lastUpdated: Date.now()
             });
@@ -159,21 +157,6 @@ class FirebaseSignaling {
       console.error(`[FirebaseSignaling] ❌ onValue state error:`, error);
     });
     this.unsubscribers.push(() => stateUnsub());
-
-    const messagesUnsub = onValue(ref(db, `rooms/${this.roomCode}/messages`), (snapshot: any) => {
-      const messages = snapshot.val();
-      if (messages) {
-        Object.values(messages).forEach((msg: any) => {
-          if (msg.senderId !== this.myId) {
-            const { senderId, senderName, timestamp, ...syncMsg } = msg;
-            this.notifyMessage(syncMsg as SyncMessage);
-          }
-        });
-      }
-    }, (error: any) => {
-      console.error(`[FirebaseSignaling] ❌ onValue messages error:`, error);
-    });
-    this.unsubscribers.push(() => messagesUnsub());
   }
 
   private broadcastInitialUsers() {

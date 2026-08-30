@@ -7,7 +7,6 @@ interface PlayerControlsProps {
   isMuted: boolean;
   isHost: boolean;
   isConnected: boolean;
-  controlsLocked?: boolean;
   onTogglePlay: () => void;
   onNext: () => void;
   onPrevious: () => void;
@@ -21,18 +20,13 @@ export function PlayerControls({
   isMuted,
   isHost,
   isConnected,
-  controlsLocked = false,
   onTogglePlay,
   onNext,
   onPrevious,
   onToggleShuffle,
   onToggleMute,
 }: PlayerControlsProps) {
-  // Mute is a personal/local control — always allowed.
-  // Shuffle is a personal toggle that doesn't affect others — always allowed.
-  // Play/Pause/Next/Prev are sync controls — locked for non-host during veto.
-  const locked = !isHost && controlsLocked;
-  const canControlPlayback = isConnected && !locked;
+  const canControl = isConnected;
 
   return (
     <div className="flex items-center justify-center gap-3 pt-2">
@@ -54,7 +48,7 @@ export function PlayerControls({
         variant="ghost"
         size="icon"
         onClick={onPrevious}
-        disabled={!canControlPlayback}
+        disabled={!canControl}
         className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
       >
         <SkipBack className="w-5 h-5" />
@@ -62,7 +56,7 @@ export function PlayerControls({
       
       <Button
         onClick={onTogglePlay}
-        disabled={!canControlPlayback}
+        disabled={!canControl}
         className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors disabled:opacity-50"
       >
         {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
@@ -72,7 +66,7 @@ export function PlayerControls({
         variant="ghost"
         size="icon"
         onClick={onNext}
-        disabled={!canControlPlayback}
+        disabled={!canControl}
         className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
       >
         <SkipForward className="w-5 h-5" />

@@ -5,12 +5,11 @@ interface ProgressBarProps {
   duration: number;
   isHost: boolean;
   isConnected: boolean;
-  controlsLocked?: boolean;
   onSeek: (time: number) => void;
 }
 
-export function ProgressBar({ currentTime, duration, isHost, isConnected, controlsLocked = false, onSeek }: ProgressBarProps) {
-  const canSeek = isConnected && (isHost || !controlsLocked);
+export function ProgressBar({ currentTime, duration, isHost, isConnected, onSeek }: ProgressBarProps) {
+  const canSeek = isConnected;
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!canSeek) return;
