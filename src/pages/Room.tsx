@@ -169,6 +169,8 @@ const Room = () => {
     const newVetoActive = state.vetoActive ?? true;
     const newTargetSyncedTime = state.targetSyncedTime;
     const newIsPlaying = state.isPlaying ?? false;
+    const newPauseTargetSyncedTime = state.pauseTargetSyncedTime;
+    const newPauseAtTime = state.pauseAtTime;
     
     // Update queue if different
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
@@ -187,6 +189,13 @@ const Room = () => {
         }
       }
       lastVetoToastRef.current = newVetoActive;
+    }
+    
+    // Handle synced pause from host - schedule a pause at the exact synced time
+    if (newPauseTargetSyncedTime !== undefined && newPauseAtTime !== undefined) {
+      console.log(`[Room] ⏸️ MEMBER: Received synced pause at synced time ${newPauseTargetSyncedTime}, position ${newPauseAtTime}s`);
+      syncScheduler.schedulePause(newPauseAtTime, newPauseTargetSyncedTime);
+      syncScheduler.startCountdown();
     }
     
     // Handle scheduled track from host - this is the PRIMARY sync mechanism
@@ -222,19 +231,6 @@ const Room = () => {
       // Track change without scheduled time - just update the index
       console.log(`[Room] MEMBER: Track change (no schedule): ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
-    }
-
-    // Handle play/pause commands (for immediate response when not using scheduled sync)
-    if (newIsPlaying && !newTargetSyncedTime) {
-      const audioEl = syncScheduler.getAudioElement();
-      if (audioEl.paused) {
-        audioEl.play().catch(console.error);
-      }
-    } else if (!newIsPlaying && !newTargetSyncedTime) {
-      const audioEl = syncScheduler.getAudioElement();
-      if (!audioEl.paused) {
-        audioEl.pause();
-      }
     }
   }, [isHost]);
 
@@ -394,6 +390,8 @@ const Room = () => {
       queue: queueRef.current,
       targetSyncedTime,
       isPlaying: false, // Will be triggered by scheduler
+      pauseTargetSyncedTime: undefined,
+      pauseAtTime: undefined,
     });
 
     setCurrentIndex(trackIdx);
@@ -408,11 +406,31 @@ const Room = () => {
     const audioEl = syncScheduler.getAudioElement();
     
     if (!audioEl.paused) {
-      // Currently playing -> pause
+      // Currently playing -> schedule a SYNCED pause
+      if (!syncedClock.isReady()) {
+        toast.error("Clock not calibrated yet. Please wait...");
+        return;
+      }
+
+      const currentPosition = audioEl.currentTime;
+      // Small network buffer so the pause command has time to propagate
+      const pauseTargetSyncedTime = syncedClock.now() + 500;
+      
+      console.log(`[Room] ⏸️ HOST scheduling synced pause at position ${currentPosition}s, target synced time ${pauseTargetSyncedTime}`);
+      
+      // Host pauses locally immediately (host gets instant feedback)
       audioEl.pause();
+      
+      // Schedule a synced pause for the scheduler (in case we need it for re-sync)
+      syncScheduler.schedulePause(currentPosition, pauseTargetSyncedTime);
+      syncScheduler.startCountdown();
+      
+      // Broadcast the synced pause to all members
       updatePlaybackStateRef.current?.({
         isPlaying: false,
         targetSyncedTime: undefined,
+        pauseTargetSyncedTime,
+        pauseAtTime: currentPosition,
       });
     } else {
       // Not playing -> schedule current track
