@@ -1,26 +1,26 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, Database } from "firebase/database";
 
-// Firebase config - uses anonymous signup, no credit card needed
-// Free tier: 1GB stored, 10GB/month transfer, 50 concurrent connections
+// Firebase config - your real credentials
 const firebaseConfig = {
-  apiKey: "AIzaSyDemo-Meoww-FreeTier-Key",
+  apiKey: "AIzaSyC-a_AcGt2LJ3A6O0gyKBI6wg_FfJRyP30",
   authDomain: "meoww-audio.firebaseapp.com",
-  databaseURL: "https://meoww-audio-default-rtdb.firebaseio.com",
+  databaseURL: "https://meoww-audio-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "meoww-audio",
-  storageBucket: "meoww-audio.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:meoww123"
+  storageBucket: "meoww-audio.firebasestorage.app",
+  messagingSenderId: "768504750699",
+  appId: "1:768504750699:web:fe655aaa0435aa1c04072e"
 };
 
-// Try to initialize Firebase, gracefully handle if it fails
+// Initialize Firebase
 let db: Database | null = null;
 
 try {
   const app = initializeApp(firebaseConfig);
   db = getDatabase(app);
+  console.log("✅ Firebase connected");
 } catch (error) {
-  console.warn("Firebase initialization failed, using fallback mode");
+  console.error("❌ Firebase init failed:", error);
 }
 
 export { db, ref, onValue, set, push, remove, onDisconnect, serverTimestamp };
