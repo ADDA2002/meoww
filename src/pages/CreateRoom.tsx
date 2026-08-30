@@ -16,6 +16,7 @@ const CreateRoom = () => {
 
   return (
     <div className="min-h-screen bg-white text-black py-12 px-4 sm:px-6 lg:px-8">
+      <Header />
       <div className="max-w-md mx-auto space-y-8">
         <div className="text-center">
           <h1 className="text-3xl font-bold mb-4 text-black">Create a Room</h1>
