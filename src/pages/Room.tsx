@@ -11,8 +11,8 @@ import { formatTime } from "@/lib/utils";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
-const SYNC_TICK_MS = 200;
-const RESYNC_THRESHOLD_SEC = 0.1;
+const SYNC_TICK_MS = 500;
+const RESYNC_THRESHOLD_SEC = 0.3;
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -43,7 +43,6 @@ const Room = () => {
   const isHostRef = useRef(isHost);
   const lastSyncStateRef = useRef<FirebaseSyncState | null>(null);
   const lastSyncTimeRef = useRef<number>(0);
-  const queueRefHashRef = useRef<string>("");
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -53,7 +52,6 @@ const Room = () => {
   const currentTrack = queue[currentIndex] || null;
 
   // Broadcast current state to Firebase
-  // Pass explicit isPlaying instead of reading from audio.paused (which lags behind React state)
   const broadcastState = useCallback((extra?: Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean }) => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -62,34 +60,15 @@ const Room = () => {
       ? extra.explicitIsPlaying
       : !audio.paused;
 
-    const { explicitIsPlaying, queue: _ignoredQueue, ...rest } = (extra || {}) as Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean; queue?: Track[] };
+    const { explicitIsPlaying, ...rest } = (extra || {}) as Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean };
 
-    // Compute the freshest currentTime right at broadcast time
-    const freshTime = audio.currentTime;
-    const now = Date.now();
-
-    // Only include queue when it actually changed (slim down the hot-path payload)
-    const includeQueue = (extra && "queue" in (extra as object)) || queueRefHashRef.current === "";
-
-    if (includeQueue) {
-      queueRefHashRef.current = queueRef.current.map(t => t.id).join(",");
-      updatePlaybackStateRef.current?.({
-        currentTrackIndex: currentIndexRef.current,
-        queue: queueRef.current,
-        isPlaying: playing,
-        currentTime: freshTime,
-        currentTimeUpdatedAt: now,
-        ...rest,
-      });
-    } else {
-      updatePlaybackStateRef.current?.({
-        currentTrackIndex: currentIndexRef.current,
-        isPlaying: playing,
-        currentTime: freshTime,
-        currentTimeUpdatedAt: now,
-        ...rest,
-      });
-    }
+    updatePlaybackStateRef.current?.({
+      currentTrackIndex: currentIndexRef.current,
+      queue: queueRef.current,
+      isPlaying: playing,
+      currentTime: audio.currentTime,
+      ...rest,
+    });
   }, []);
 
   // Play a track from the beginning — used for next/prev buttons and auto-play
@@ -137,7 +116,6 @@ const Room = () => {
       const newQueueIds = newQueue.map(t => t.id).join(",");
       if (currentQueueIds !== newQueueIds) {
         setQueue(newQueue);
-        queueRefHashRef.current = newQueueIds;
       }
     }
 
@@ -287,36 +265,20 @@ const Room = () => {
           audio.currentTime = expectedTime;
           setCurrentTime(expectedTime);
         }
-      }, SYNC_TICK_MS);
+      }, 500);
       return () => clearInterval(interval);
     }
 
-    // Host: broadcast position every SYNC_TICK_MS using the freshest
-    // audio.currentTime captured at the moment of broadcast.
+    // Host: broadcast position every 500ms
     const interval = setInterval(() => {
       const audio = audioRef.current;
       if (!audio) return;
-      const freshTime = audio.currentTime;
-      const now = Date.now();
-      const queueChanged = queueRefHashRef.current !== queueRef.current.map(t => t.id).join(",");
-
-      if (queueChanged) {
-        queueRefHashRef.current = queueRef.current.map(t => t.id).join(",");
-        updatePlaybackStateRef.current?.({
-          currentTrackIndex: currentIndexRef.current,
-          queue: queueRef.current,
-          isPlaying: !audio.paused,
-          currentTime: freshTime,
-          currentTimeUpdatedAt: now,
-        });
-      } else {
-        updatePlaybackStateRef.current?.({
-          currentTrackIndex: currentIndexRef.current,
-          isPlaying: !audio.paused,
-          currentTime: freshTime,
-          currentTimeUpdatedAt: now,
-        });
-      }
+      updatePlaybackStateRef.current?.({
+        currentTrackIndex: currentIndexRef.current,
+        queue: queueRef.current,
+        isPlaying: !audio.paused,
+        currentTime: audio.currentTime,
+      });
     }, SYNC_TICK_MS);
     return () => clearInterval(interval);
   }, [isHost]);
@@ -340,7 +302,6 @@ const Room = () => {
     updatePlaybackStateRef.current?.({
       isPlaying: willBePlaying,
       currentTime: audio.currentTime,
-      currentTimeUpdatedAt: Date.now(),
     });
   }, []);
 
@@ -368,10 +329,7 @@ const Room = () => {
       const t = parseFloat(e.target.value);
       audioRef.current.currentTime = t;
       setCurrentTime(t);
-      updatePlaybackStateRef.current?.({
-        currentTime: t,
-        currentTimeUpdatedAt: Date.now(),
-      });
+      updatePlaybackStateRef.current?.({ currentTime: t });
     }
   }, []);
 

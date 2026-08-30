@@ -27,15 +27,8 @@ export function useFirebaseSync({
   const signalingRef = useRef<FirebaseSignaling | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Only connect when both roomCode and myId are set
   useEffect(() => {
     if (!roomCode || !myId) return;
-
-    // Clean up any existing connection before creating a new one
-    if (signalingRef.current) {
-      signalingRef.current.disconnect();
-      signalingRef.current = null;
-    }
 
     const signaling = new FirebaseSignaling(roomCode, myId, userName, isHost);
     signalingRef.current = signaling;
@@ -52,7 +45,6 @@ export function useFirebaseSync({
 
     return () => {
       signaling.disconnect();
-      signalingRef.current = null;
     };
   }, [roomCode, myId]);
 
