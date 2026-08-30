@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical } from "lucide-react";
+import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical, Youtube, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,12 +19,19 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
+import {
   DragDropContext,
   Droppable,
   Draggable,
   type DropResult,
 } from "@hello-pangea/dnd";
 import { Track } from "@/types/music";
+import { fetchMp3FromYouTube } from "@/lib/youtubeToMp3";
 
 interface RoomDrawerProps {
   roomCode: string;
@@ -62,6 +69,11 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
   const [songArtist, setSongArtist] = useState("");
   const [songUrl, setSongUrl] = useState("");
 
+  // YouTube state
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [isConverting, setIsConverting] = useState(false);
+  const [youtubeError, setYoutubeError] = useState<string | null>(null);
+
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
     setCopied(true);
@@ -89,6 +101,49 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     if (file) {
       onLocalFileUpload?.(file);
       setAddSongOpen(false);
+    }
+  };
+
+  const handleYoutubeConvert = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setYoutubeError(null);
+
+    if (!youtubeUrl.trim()) {
+      setYoutubeError("Please paste a YouTube link.");
+      return;
+    }
+
+    setIsConverting(true);
+
+    try {
+      const { url, filename } = await fetchMp3FromYouTube(youtubeUrl);
+
+      onAddSong?.({
+        title: filename,
+        artist: "YouTube",
+        url,
+      });
+
+      setYoutubeUrl("");
+      setAddSongOpen(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to convert video.";
+      setYoutubeError(message);
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
+  const handleDialogChange = (isOpen: boolean) => {
+    setAddSongOpen(isOpen);
+    if (!isOpen) {
+      // Reset all form state on close
+      setSongTitle("");
+      setSongArtist("");
+      setSongUrl("");
+      setYoutubeUrl("");
+      setYoutubeError(null);
+      setIsConverting(false);
     }
   };
 
@@ -164,7 +219,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                 Playlist ({queue.length})
               </div>
               {isHost && onAddSong && (
-                <Dialog open={addSongOpen} onOpenChange={setAddSongOpen}>
+                <Dialog open={addSongOpen} onOpenChange={handleDialogChange}>
                   <DialogTrigger asChild>
                     <Button size="sm" className="bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold px-3 py-1 h-7">
                       <Plus className="w-3.5 h-3.5 mr-1" />ADD
@@ -174,35 +229,101 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                     <DialogHeader>
                       <DialogTitle className="text-lg font-bold tracking-tight uppercase">Add Song</DialogTitle>
                     </DialogHeader>
-                    <div className="space-y-6 pt-2">
-                      <div className="p-4 border border-dashed border-black bg-gray-50 text-center space-y-2">
-                        <Upload className="w-6 h-6 mx-auto text-black" />
-                        <p className="text-xs font-semibold uppercase">Upload MP3</p>
-                        <label className="inline-block mt-2 cursor-pointer bg-black text-white text-xs font-mono px-4 py-2 hover:bg-neutral-800">
-                          Select MP3
-                          <input type="file" accept="audio/mp3,audio/*" onChange={handleFileUpload} className="hidden" />
-                        </label>
-                      </div>
-                      <div className="relative flex py-1 items-center">
-                        <div className="flex-grow border-t border-gray-300"></div>
-                        <span className="flex-shrink mx-4 text-gray-400 text-xs font-mono uppercase">Or URL</span>
-                        <div className="flex-grow border-t border-gray-300"></div>
-                      </div>
-                      <form onSubmit={handleAddSong} className="space-y-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs font-mono uppercase text-gray-700">Title</Label>
-                          <Input value={songTitle} onChange={(e) => setSongTitle(e.target.value)} placeholder="Song name" className="border-gray-300" />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs font-mono uppercase text-gray-700">Artist</Label>
-                          <Input value={songArtist} onChange={(e) => setSongArtist(e.target.value)} placeholder="Artist name" className="border-gray-300" />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs font-mono uppercase text-gray-700">Audio URL</Label>
-                          <Input value={songUrl} onChange={(e) => setSongUrl(e.target.value)} placeholder="https://..." className="border-gray-300 font-mono text-xs" />
-                        </div>
-                        <Button type="submit" className="w-full bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold py-2">Add to Queue</Button>
-                      </form>
+                    <div className="pt-2">
+                      <Tabs defaultValue="youtube" className="w-full">
+                        <TabsList className="grid w-full grid-cols-3 bg-gray-100 border border-black rounded-none p-0 h-auto">
+                          <TabsTrigger
+                            value="youtube"
+                            className="rounded-none data-[state=active]:bg-black data-[state=active]:text-white font-mono text-xs uppercase py-2"
+                          >
+                            <Youtube className="w-3.5 h-3.5 mr-1" />YT
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="url"
+                            className="rounded-none data-[state=active]:bg-black data-[state=active]:text-white font-mono text-xs uppercase py-2"
+                          >
+                            URL
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="upload"
+                            className="rounded-none data-[state=active]:bg-black data-[state=active]:text-white font-mono text-xs uppercase py-2"
+                          >
+                            <Upload className="w-3.5 h-3.5 mr-1" />FILE
+                          </TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="youtube" className="space-y-3 mt-4">
+                          <form onSubmit={handleYoutubeConvert} className="space-y-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs font-mono uppercase text-gray-700">YouTube Link</Label>
+                              <Input
+                                value={youtubeUrl}
+                                onChange={(e) => { setYoutubeUrl(e.target.value); setYoutubeError(null); }}
+                                placeholder="https://www.youtube.com/watch?v=..."
+                                className="border-gray-300 font-mono text-xs"
+                                disabled={isConverting}
+                              />
+                            </div>
+
+                            {youtubeError && (
+                              <div className="border border-red-500 bg-red-50 text-red-700 px-3 py-2 text-xs font-mono">
+                                {youtubeError}
+                              </div>
+                            )}
+
+                            <Button
+                              type="submit"
+                              disabled={isConverting || !youtubeUrl.trim()}
+                              className="w-full bg-red-600 hover:bg-red-700 text-white font-mono text-xs font-bold py-2 disabled:opacity-50"
+                            >
+                              {isConverting ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+                                  Converting...
+                                </>
+                              ) : (
+                                <>
+                                  <Youtube className="w-3.5 h-3.5 mr-2" />
+                                  Convert & Add to Queue
+                                </>
+                              )}
+                            </Button>
+
+                            <p className="text-[10px] font-mono text-gray-400 uppercase tracking-wider text-center pt-1">
+                              Free • No login • Direct MP3 link
+                            </p>
+                          </form>
+                        </TabsContent>
+
+                        <TabsContent value="upload" className="space-y-3 mt-4">
+                          <div className="p-4 border border-dashed border-black bg-gray-50 text-center space-y-2">
+                            <Upload className="w-6 h-6 mx-auto text-black" />
+                            <p className="text-xs font-semibold uppercase">Upload MP3</p>
+                            <label className="inline-block mt-2 cursor-pointer bg-black text-white text-xs font-mono px-4 py-2 hover:bg-neutral-800">
+                              Select MP3
+                              <input type="file" accept="audio/mp3,audio/*" onChange={handleFileUpload} className="hidden" />
+                            </label>
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="url" className="space-y-3 mt-4">
+                          <form onSubmit={handleAddSong} className="space-y-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs font-mono uppercase text-gray-700">Title</Label>
+                              <Input value={songTitle} onChange={(e) => setSongTitle(e.target.value)} placeholder="Song name" className="border-gray-300" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs font-mono uppercase text-gray-700">Artist</Label>
+                              <Input value={songArtist} onChange={(e) => setSongArtist(e.target.value)} placeholder="Artist name" className="border-gray-300" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs font-mono uppercase text-gray-700">Audio URL</Label>
+                              <Input value={songUrl} onChange={(e) => setSongUrl(e.target.value)} placeholder="https://..." className="border-gray-300 font-mono text-xs" />
+                            </div>
+                            <Button type="submit" className="w-full bg-black hover:bg-neutral-800 text-white font-mono text-xs font-bold py-2">Add to Queue</Button>
+                          </form>
+                        </TabsContent>
+                      </Tabs>
                     </div>
                   </DialogContent>
                 </Dialog>
