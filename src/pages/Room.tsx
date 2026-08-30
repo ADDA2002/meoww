@@ -6,7 +6,7 @@ import { Player } from "@/components/Player";
 import { Queue } from "@/components/Queue";
 import { Participants } from "@/components/Participants";
 import { RoomDrawer } from "@/components/RoomDrawer";
-import { formatDisplayName } from "@/lib/utils";
+import { formatDisplayName } from "@/lib/constants";
 import { DEFAULT_TRACKS } from "@/lib/constants";
 import { showSuccess, showError, showInfo } from "@/utils/toast";
 import type { Track, RoomUser, SyncMessage } from "@/types/music";
@@ -35,15 +35,18 @@ const Room = () => {
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
 
   // State refs for callbacks
-  const usersRef = useRef(users);
-  const queueRef = useRef(queue);
+  const usersRef = useRef<RoomUser[]>([]);
+  const queueRef = useRef<Track[]>(queue);
   const currentIndexRef = useRef(currentIndex);
   const isHostRef = useRef(isHost);
+  const userNameRef = useRef(userName);
 
+  // Keep refs in sync
   useEffect(() => { usersRef.current = users; }, [users]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
+  useEffect(() => { userNameRef.current = userName; }, [userName]);
 
   // Audio player
   const {
@@ -86,6 +89,19 @@ const Room = () => {
     syncSeek(seekTime);
   }, [syncSeek]);
 
+  // Add user to list (with deduplication)
+  const addUser = useCallback((user: RoomUser) => {
+    setUsers(prev => {
+      if (prev.find(u => u.id === user.id)) return prev;
+      return [...prev, user];
+    });
+  }, []);
+
+  // Broadcast full user list to all peers
+  const broadcastUserList = useCallback(() => {
+    broadcast({ type: "USER_LIST", users: usersRef.current });
+  }, [broadcast]);
+
   // Handle incoming messages
   const handleMessage = useCallback((msg: SyncMessage) => {
     switch (msg.type) {
@@ -94,15 +110,35 @@ const Room = () => {
         showInfo(`Your name was updated to "${msg.newName}" because "${msg.originalName}" was taken.`);
         break;
 
-      case "JOIN":
-        if (!usersRef.current.find(u => u.id === msg.user.id)) {
-          setUsers(prev => [...prev, msg.user]);
-          showInfo(`${msg.user.name} joined the jam!`);
+      case "JOIN": {
+        const user = msg.user;
+        // Check if user already exists
+        const exists = usersRef.current.find(u => u.id === user.id);
+        if (!exists) {
+          addUser(user);
+          showInfo(`${user.name} joined the jam!`);
+          
+          // Host: broadcast updated user list to all peers
+          if (isHostRef.current) {
+            setTimeout(() => broadcastUserList(), 100);
+          }
         }
         break;
+      }
 
       case "USER_LIST":
+        // Replace entire user list with the authoritative one from host
         setUsers(msg.users);
+        // Ensure our own ID is in the list
+        if (myId && !msg.users.find((u: RoomUser) => u.id === myId)) {
+          const me = usersRef.current.find(u => u.id === myId);
+          if (me) {
+            setUsers(prev => {
+              if (prev.find(u => u.id === myId)) return prev;
+              return [...prev, me];
+            });
+          }
+        }
         break;
 
       case "PLAY":
@@ -122,7 +158,7 @@ const Room = () => {
         setCurrentIndex(msg.activeIndex);
         break;
     }
-  }, [handlePlaySync, handlePauseSync, handleSeekSync]);
+  }, [handlePlaySync, handlePauseSync, handleSeekSync, addUser, broadcastUserList, myId]);
 
   // Initialize PeerJS
   useEffect(() => {
@@ -142,12 +178,25 @@ const Room = () => {
     peer.on("connection", (conn) => {
       conn.on("open", () => {
         connectionsRef.current.set(conn.peer, conn);
-        const me: RoomUser = { id: peerId, name: userName, isHost, joinedAt: Date.now() };
-        conn.send({ type: "JOIN", user: me });
         
-        if (isHost) {
-          conn.send({ type: "USER_LIST", users: usersRef.current });
-          conn.send({ type: "UPDATE_QUEUE", queue: queueRef.current, activeIndex: currentIndexRef.current });
+        // Host: Add connecting user to list immediately
+        if (isHostRef.current) {
+          const connectingUser: RoomUser = {
+            id: conn.peer,
+            name: `User-${conn.peer.slice(-4)}`, // Temporary name until they tell us
+            isHost: false,
+            joinedAt: Date.now(),
+          };
+          addUser(connectingUser);
+        }
+
+        // Send current state
+        if (isHostRef.current) {
+          // Small delay to ensure user is added to list
+          setTimeout(() => {
+            broadcastUserList();
+            conn.send({ type: "UPDATE_QUEUE", queue: queueRef.current, activeIndex: currentIndexRef.current });
+          }, 200);
         }
       });
 
@@ -155,7 +204,15 @@ const Room = () => {
 
       conn.on("close", () => {
         connectionsRef.current.delete(conn.peer);
-        setUsers(prev => prev.filter(u => u.id !== conn.peer));
+        // Remove user from list
+        setUsers(prev => {
+          const updated = prev.filter(u => u.id !== conn.peer);
+          // Broadcast updated list to remaining peers
+          if (updated.length !== prev.length && isHostRef.current) {
+            setTimeout(() => broadcastUserList(), 100);
+          }
+          return updated;
+        });
       });
     });
 
@@ -168,19 +225,20 @@ const Room = () => {
     });
 
     return () => { peer.destroy(); };
-  }, [roomCode]);
+  }, [roomCode, addUser, broadcastUserList, handleMessage]);
 
   // Connect to host (listener)
   useEffect(() => {
-    if (isHost || !isConnected || !peerRef.current) return;
+    if (isHost || !isConnected || !peerRef.current || !myId) return;
 
     const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
-    const me: RoomUser = { id: myId, name: userName, isHost: false, joinedAt: Date.now() };
+    const me: RoomUser = { id: myId, name: userNameRef.current, isHost: false, joinedAt: Date.now() };
 
     const conn = peerRef.current.connect(hostPeerId, { reliable: true });
 
     conn.on("open", () => {
       connectionsRef.current.set(conn.peer, conn);
+      // Send JOIN with our actual name
       conn.send({ type: "JOIN", user: me });
     });
 
@@ -189,12 +247,13 @@ const Room = () => {
     conn.on("close", () => {
       connectionsRef.current.delete(conn.peer);
     });
-  }, [isHost, isConnected, myId, roomCode, userName, handleMessage]);
+  }, [isHost, isConnected, myId, roomCode, handleMessage]);
 
-  // Add self to users list
+  // Add self to users list when myId is available
   useEffect(() => {
     if (myId && !users.find(u => u.id === myId)) {
-      setUsers([{ id: myId, name: userName, isHost, joinedAt: Date.now() }]);
+      const me: RoomUser = { id: myId, name: userName, isHost, joinedAt: Date.now() };
+      setUsers([me]);
     }
   }, [myId, userName, isHost]);
 
