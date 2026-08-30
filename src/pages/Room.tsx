@@ -37,6 +37,18 @@ import { formatDisplayName } from "@/utils/nameFormat";
 import RoomDrawer from "@/components/RoomDrawer";
 import FirebaseSignaling, { FirebaseSyncState } from "@/services/firebaseSignaling";
 
+const PREVIOUS_RESTART_THRESHOLD = 3; // seconds
+
+// Fisher-Yates shuffle, returns a NEW array
+const shuffleArray = <T,>(arr: T[]): T[] => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
 const Room = () => {
   const { code } = useParams<{ code: string }>();
   const [searchParams] = useSearchParams();
@@ -78,6 +90,7 @@ const Room = () => {
   const currentIndexRef = useRef<number>(currentIndex);
   const currentTimeRef = useRef<number>(currentTime);
   const isPlayingRef = useRef<boolean>(isPlaying);
+  const isShuffleRef = useRef<boolean>(isShuffle);
 
   // Keep refs updated
   usersRef.current = users;
@@ -86,6 +99,7 @@ const Room = () => {
   currentIndexRef.current = currentIndex;
   currentTimeRef.current = currentTime;
   isPlayingRef.current = isPlaying;
+  isShuffleRef.current = isShuffle;
 
   const currentTrack = queue[currentIndex] || null;
 
@@ -96,20 +110,7 @@ const Room = () => {
     }
   }, [isMuted]);
 
-  // ALWAYS reset to 0:00 when track changes
-  useEffect(() => {
-    setCurrentTime(0);
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-    }
-    // Always pause when track changes - user must press play
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    setIsPlaying(false);
-  }, [currentIndex]);
-
-  // Sync audio time for syncing
+  // Sync audio time for UI
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -144,18 +145,56 @@ const Room = () => {
       handleIncomingMessage(msg);
     });
 
-    // Handle state changes (from host)
+    // Handle state changes (from host) - this is the PRIMARY sync mechanism
     signaling.onStateChange((state: FirebaseSyncState) => {
       console.log(`[Room] 🔔 onStateChange fired, state=`, state);
-      if (!isHostRef.current) {
-        if (state.queue && state.queue.length > 0) {
+      if (isHostRef.current) return; // Host ignores state changes (it owns the state)
+
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      // 1. Update queue if changed
+      if (state.queue && state.queue.length > 0) {
+        const incomingIds = state.queue.map(t => t.id).join(",");
+        const currentIds = queueRef.current.map(t => t.id).join(",");
+        if (incomingIds !== currentIds) {
           setQueue(state.queue);
         }
-        if (state.currentTrackIndex !== undefined) {
-          setCurrentIndex(state.currentTrackIndex);
+      }
+
+      // 2. Update current track index if changed
+      if (state.currentTrackIndex !== undefined && state.currentTrackIndex !== currentIndexRef.current) {
+        console.log(`[Room] Member: switching to track index ${state.currentTrackIndex}`);
+        setCurrentIndex(state.currentTrackIndex);
+        setCurrentTime(0);
+        audio.currentTime = 0;
+      }
+
+      // 3. Sync play/pause state
+      if (state.isPlaying !== undefined && state.isPlaying !== isPlayingRef.current) {
+        if (state.isPlaying) {
+          // Sync start position if provided
+          if (state.currentTime !== undefined) {
+            const latency = state.timestamp ? (Date.now() - state.timestamp) / 1000 : 0;
+            const targetTime = state.currentTime + latency;
+            if (Math.abs(audio.currentTime - targetTime) > 0.3) {
+              audio.currentTime = targetTime;
+            }
+          }
+          audio.play().then(() => setIsPlaying(true)).catch(() => {});
+        } else {
+          audio.pause();
+          setIsPlaying(false);
         }
-        // Don't auto-play on sync - just update the state
-        // User must press play manually
+      }
+
+      // 4. Sync seek (when not changing play state)
+      if (state.currentTime !== undefined && state.isPlaying === isPlayingRef.current) {
+        const latency = state.timestamp ? (Date.now() - state.timestamp) / 1000 : 0;
+        const targetTime = state.currentTime + latency;
+        if (Math.abs(audio.currentTime - targetTime) > 0.5) {
+          audio.currentTime = targetTime;
+        }
       }
     });
 
@@ -179,11 +218,25 @@ const Room = () => {
       if (!isHost) {
         signaling.getState().then((state) => {
           if (state) {
+            // Sync initial state
             if (state.queue && state.queue.length > 0) {
               setQueue(state.queue);
             }
-            setCurrentIndex(state.currentTrackIndex || 0);
-            // Don't auto-play when joining - keep paused
+            if (state.currentTrackIndex !== undefined) {
+              setCurrentIndex(state.currentTrackIndex);
+            }
+            if (state.isPlaying) {
+              const audio = audioRef.current;
+              if (audio) {
+                const latency = state.timestamp ? (Date.now() - state.timestamp) / 1000 : 0;
+                if (state.currentTime !== undefined) {
+                  audio.currentTime = state.currentTime + latency;
+                }
+                audio.play().then(() => setIsPlaying(true)).catch(() => {});
+              }
+            } else {
+              setIsPlaying(false);
+            }
           }
         });
       }
@@ -194,7 +247,7 @@ const Room = () => {
     };
   }, [roomCode]);
 
-  // Handle incoming sync messages
+  // Handle incoming sync messages (real-time messages)
   const handleIncomingMessage = (msg: SyncMessage) => {
     console.log(`[Room] Processing message type: ${msg.type}`);
     switch (msg.type) {
@@ -204,12 +257,14 @@ const Room = () => {
         break;
       }
       case "PLAY": {
+        // Live PLAY message (redundant with state but faster)
         if (!isHostRef.current) {
           const audio = audioRef.current;
           if (!audio) return;
           
           if (currentIndexRef.current !== msg.trackIndex) {
             setCurrentIndex(msg.trackIndex);
+            setCurrentTime(0);
           }
           
           const latency = (Date.now() - msg.timestamp) / 1000;
@@ -218,15 +273,16 @@ const Room = () => {
             audio.currentTime = targetTime;
           }
           
-          audio.play().then(() => setIsPlaying(true)).catch(() => {});
+          if (audio.paused) {
+            audio.play().then(() => setIsPlaying(true)).catch(() => {});
+          }
         }
         break;
       }
       case "PAUSE": {
         if (!isHostRef.current) {
           const audio = audioRef.current;
-          if (audio) {
-            audio.currentTime = msg.seekTime;
+          if (audio && !audio.paused) {
             audio.pause();
             setIsPlaying(false);
           }
@@ -263,7 +319,7 @@ const Room = () => {
     }
   };
 
-  // Broadcast sync message
+  // Broadcast helper - sends live message + updates persistent state
   const broadcast = (msg: SyncMessage) => {
     console.log(`[Room] Broadcasting: ${msg.type}`);
     signalingRef.current?.send(msg);
@@ -280,6 +336,7 @@ const Room = () => {
       } else if (msg.type === "PAUSE") {
         stateUpdates.isPlaying = false;
         stateUpdates.currentTime = msg.seekTime;
+        stateUpdates.timestamp = Date.now();
       } else if (msg.type === "SEEK") {
         stateUpdates.currentTime = msg.seekTime;
         stateUpdates.timestamp = msg.timestamp;
@@ -297,9 +354,17 @@ const Room = () => {
   // Auto-play next track when current ends
   const handleTrackEnd = () => {
     if (queue.length === 0) return;
-    const nextIdx = isShuffle
-      ? Math.floor(Math.random() * queue.length)
-      : (currentIndex + 1) % queue.length;
+    
+    let nextIdx: number;
+    if (isShuffleRef.current) {
+      // Pick a random index that's not the current one
+      const available = queue.map((_, i) => i).filter(i => i !== currentIndex);
+      nextIdx = available.length > 0 
+        ? available[Math.floor(Math.random() * available.length)]
+        : currentIndex;
+    } else {
+      nextIdx = (currentIndex + 1) % queue.length;
+    }
     
     setCurrentIndex(nextIdx);
     setCurrentTime(0);
@@ -313,17 +378,23 @@ const Room = () => {
     }
   };
 
-  // Playback controls
+  // ============ PLAYBACK CONTROLS ============
+  
+  // Play / Pause toggle
   const handleTogglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
     if (isPlaying) {
+      // PAUSE
       audio.pause();
       setIsPlaying(false);
-      broadcast({ type: "PAUSE", seekTime: audio.currentTime });
+      const seekTime = audio.currentTime;
+      setCurrentTime(seekTime);
+      broadcast({ type: "PAUSE", seekTime });
     } else {
-      audio.currentTime = 0; // Always start from 0
+      // PLAY (always from 0:00 as per requirement)
+      audio.currentTime = 0;
       setCurrentTime(0);
       audio.play().then(() => {
         setIsPlaying(true);
@@ -337,19 +408,57 @@ const Room = () => {
     }
   };
 
+  // NEXT: advance queue, reset to 0, auto-play
   const handleNext = () => {
-    handleTrackEnd();
+    if (queue.length === 0) return;
+    
+    let nextIdx: number;
+    if (isShuffleRef.current) {
+      const available = queue.map((_, i) => i).filter(i => i !== currentIndex);
+      nextIdx = available.length > 0 
+        ? available[Math.floor(Math.random() * available.length)]
+        : (currentIndex + 1) % queue.length;
+    } else {
+      nextIdx = (currentIndex + 1) % queue.length;
+    }
+    
+    setCurrentIndex(nextIdx);
+    setCurrentTime(0);
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
+      }).catch(() => {});
+    }
   };
 
+  // PREVIOUS: if >3s played restart current, else go to previous
   const handlePrevious = () => {
     if (queue.length === 0) return;
-    const prevIdx = isShuffle
-      ? Math.floor(Math.random() * queue.length)
-      : (currentIndex - 1 + queue.length) % queue.length;
+    
+    const audio = audioRef.current;
+    const playedTime = audio ? audio.currentTime : currentTime;
+    
+    let prevIdx: number;
+    if (playedTime > PREVIOUS_RESTART_THRESHOLD) {
+      // Restart current track
+      prevIdx = currentIndex;
+    } else {
+      // Go to previous track
+      if (isShuffleRef.current) {
+        const available = queue.map((_, i) => i).filter(i => i !== currentIndex);
+        prevIdx = available.length > 0 
+          ? available[Math.floor(Math.random() * available.length)]
+          : (currentIndex - 1 + queue.length) % queue.length;
+      } else {
+        prevIdx = (currentIndex - 1 + queue.length) % queue.length;
+      }
+    }
     
     setCurrentIndex(prevIdx);
     setCurrentTime(0);
-    const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
       audio.play().then(() => {
@@ -359,7 +468,9 @@ const Room = () => {
     }
   };
 
+  // SEEK: only when host is playing - sends seek to all
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isHost) return;
     const targetTime = parseFloat(e.target.value);
     const audio = audioRef.current;
     if (audio) {
@@ -369,8 +480,10 @@ const Room = () => {
     }
   };
 
+  // DIRECT QUEUE CLICK: promote to now playing + start immediately
   const handleTrackClick = (idx: number) => {
     if (!isHost) return;
+    
     setCurrentIndex(idx);
     setCurrentTime(0);
     const audio = audioRef.current;
@@ -378,12 +491,42 @@ const Room = () => {
       audio.currentTime = 0;
       audio.play().then(() => {
         setIsPlaying(true);
+        // Broadcast both queue update (activeIndex) and PLAY
+        broadcast({ type: "UPDATE_QUEUE", queue: queueRef.current, activeIndex: idx });
         broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
       }).catch(() => {});
     }
   };
 
-  // Queue management
+  // TOGGLE SHUFFLE: randomize remaining queue (if turning on)
+  const handleToggleShuffle = () => {
+    if (!isHost) return;
+    
+    const newShuffle = !isShuffle;
+    
+    if (newShuffle && queue.length > 1) {
+      // Shuffle the remaining tracks (after current) and prepend current
+      const current = queue[currentIndex];
+      const remaining = queue.filter((_, i) => i !== currentIndex);
+      const shuffled = shuffleArray(remaining);
+      const newQueue = current ? [current, ...shuffled] : shuffled;
+      
+      setQueue(newQueue);
+      setCurrentIndex(0);
+      queueRef.current = newQueue;
+      
+      // Broadcast shuffled queue
+      broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: 0 });
+      toast.success("Shuffle ON — queue randomized");
+    } else {
+      toast.success("Shuffle OFF — sequential play");
+    }
+    
+    setIsShuffle(newShuffle);
+  };
+
+  // ============ QUEUE MANAGEMENT ============
+  
   const handleAddSong = (e: React.FormEvent) => {
     e.preventDefault();
     if (!songTitle.trim() || !songUrl.trim()) {
@@ -576,24 +719,29 @@ const Room = () => {
 
             {/* Controls */}
             <div className="flex items-center justify-center gap-3 pt-2">
-              <button onClick={() => setIsShuffle(!isShuffle)} disabled={!isConnected}
-                className={`p-2 border border-black transition-colors disabled:opacity-50 ${isShuffle ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'}`}>
+              <button onClick={handleToggleShuffle} disabled={!isConnected}
+                className={`p-2 border border-black transition-colors disabled:opacity-50 ${isShuffle ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'}`}
+                aria-label="Toggle shuffle">
                 <Shuffle className="w-4 h-4" />
               </button>
               <button onClick={handlePrevious} disabled={!isConnected}
-                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50">
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
+                aria-label="Previous track">
                 <SkipBack className="w-5 h-5" />
               </button>
               <button onClick={handleTogglePlay} disabled={!isConnected}
-                className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors disabled:opacity-50">
+                className="w-14 h-14 border border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center transition-colors disabled:opacity-50"
+                aria-label={isPlaying ? "Pause" : "Play"}>
                 {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
               </button>
               <button onClick={handleNext} disabled={!isConnected}
-                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50">
+                className="p-3 border border-black bg-white hover:bg-gray-100 text-black transition-colors disabled:opacity-50"
+                aria-label="Next track">
                 <SkipForward className="w-5 h-5" />
               </button>
               <button onClick={() => setIsMuted(!isMuted)} disabled={!isConnected}
-                className={`p-2 border border-black transition-colors disabled:opacity-50 ${isMuted ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'}`}>
+                className={`p-2 border border-black transition-colors disabled:opacity-50 ${isMuted ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'}`}
+                aria-label="Toggle mute">
                 {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
             </div>
@@ -731,7 +879,7 @@ const Room = () => {
       <audio
         ref={audioRef}
         src={currentTrack?.url}
-        onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)}
+        onTimeUpdate={() => audioRef.current && isHostRef.current && isPlayingRef.current && setCurrentTime(audioRef.current.currentTime)}
         onLoadedMetadata={() => audioRef.current && setDuration(audioRef.current.duration)}
         onEnded={handleTrackEnd}
       />
