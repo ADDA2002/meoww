@@ -108,7 +108,7 @@ const Room = () => {
         playRef.current?.();
         updatePlaybackStateRef.current?.({
           currentTrackIndex: nextIdx,
-          targetEndTime: null, // Will be set when play is called
+          targetEndTime: null,
           trackDuration: null,
         });
       }, 100);
@@ -117,11 +117,12 @@ const Room = () => {
 
   const playRef = useRef(play);
   const pauseRef = useRef(pause);
+  const seekRef = useRef(seek);
   const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
-  const broadcastRef = useRef<((msg: SyncMessage) => void) | null>(null);
 
   playRef.current = play;
   pauseRef.current = pause;
+  seekRef.current = seek;
 
   // Clear any scheduled playback timers
   const clearScheduledTimers = useCallback(() => {
@@ -298,10 +299,9 @@ const Room = () => {
     onSessionEnded: handleSessionEnded,
   });
 
-  // Store refs
+  // Store refs - AFTER useFirebaseSync
   useEffect(() => {
     updatePlaybackStateRef.current = updatePlaybackState;
-    broadcastRef.current = broadcast;
   }, [updatePlaybackState]);
 
   // Load initial state when connected (for members joining mid-session)
@@ -372,7 +372,7 @@ const Room = () => {
       trackDuration: remainingMs,
       queue: queueRef.current,
     });
-  }, [isHost]);
+  }, [isHost, currentTrack]);
 
   const handleTogglePlay = useCallback(() => {
     if (!isHost) {
