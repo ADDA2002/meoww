@@ -77,7 +77,7 @@ const Room = () => {
 
   // Handle state changes from Firebase (for members receiving host updates)
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
-    if (isHost) return; // Host controls state, doesn't need to receive
+    if (isHost) return;
     
     const newIndex = state.currentTrackIndex ?? 0;
     const newQueue = state.queue || [];
@@ -107,7 +107,6 @@ const Room = () => {
   }, [isHost]);
 
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
-    // Handle messages if needed
   }, []);
 
   // Initialize audio element
@@ -157,7 +156,7 @@ const Room = () => {
     audio.load();
   }, [currentTrack]);
 
-  const { isConnected, updatePlaybackState } = useFirebaseSync({
+  const { updatePlaybackState } = useFirebaseSync({
     roomCode,
     myId,
     userName,
@@ -432,13 +431,12 @@ const Room = () => {
             </div>
           </>
         ) : (
-          // MEMBER VIEW: Just the synced status + track display
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-            <div className="flex items-center gap-2 text-sm font-mono font-semibold text-gray-700 uppercase mb-8">
+          // MEMBER VIEW: Just the synced status text
+          <div className="flex flex-col items-center justify-center min-h-[60vh]">
+            <div className="flex items-center gap-2 text-sm font-mono font-semibold text-gray-700 uppercase">
               <span className="w-2 h-2 bg-black"></span>
               <span>Synced with host</span>
             </div>
-            <p className="text-xs font-mono text-gray-400">Waiting for host to start music...</p>
           </div>
         )}
       </main>
