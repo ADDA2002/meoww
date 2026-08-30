@@ -23,19 +23,26 @@ export interface ScheduledTrack {
   status: "pending" | "fetching" | "buffered" | "playing" | "failed";
   // Error message if failed
   error?: string;
+  // Track ID for ready-state matching
+  trackId: string;
 }
 
 type SchedulerListener = (tracks: ScheduledTrack[]) => void;
+type ReadyListener = (trackId: string) => void;
 
 class SyncScheduler {
   private tracks: Map<string, ScheduledTrack> = new Map();
   private listeners: SchedulerListener[] = [];
+  private readyListeners: ReadyListener[] = [];
   private audioElement: HTMLAudioElement | null = null;
   private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private activeTrackId: string | null = null;
+  // When true, the countdown will wait for both host and member to be ready
+  private waitForSyncGate: boolean = false;
+  // Track which trackId we're waiting for the gate on
+  private gatingTrackId: string | null = null;
 
   constructor() {
-    // Create a single shared audio element
     if (typeof window !== "undefined") {
       this.audioElement = new Audio();
       this.audioElement.preload = "auto";
@@ -47,24 +54,25 @@ class SyncScheduler {
    * Phase 2: Schedule a track to play at a specific synced time.
    * The targetSyncedTime is in milliseconds (Synced Master Time).
    */
-  scheduleTrack(track: Track, targetSyncedTime: number, id?: string): string {
-    const trackId = id || `scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+  scheduleTrack(track: Track, targetSyncedTime: number, id?: string, trackId?: string): string {
+    const scheduleId = id || `scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const schedulableTrackId = trackId || `track-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     
     const scheduled: ScheduledTrack = {
       track,
       targetSyncedTime,
       status: "pending",
+      trackId: schedulableTrackId,
     };
 
-    this.tracks.set(trackId, scheduled);
+    this.tracks.set(scheduleId, scheduled);
     this.notifyListeners();
 
-    console.log(`[SyncScheduler] 📅 Scheduled "${track.title}" for synced time ${targetSyncedTime} (in ${targetSyncedTime - syncedClock.now()}ms)`);
+    console.log(`[SyncScheduler] 📅 Scheduled "${track.title}" (trackId: ${schedulableTrackId}) for synced time ${targetSyncedTime} (in ${targetSyncedTime - syncedClock.now()}ms)`);
 
-    // Phase 3: Start pre-fetching the audio file
-    this.prefetchTrack(trackId, track.url);
+    this.prefetchTrack(scheduleId, track.url);
 
-    return trackId;
+    return scheduleId;
   }
 
   /**
@@ -75,7 +83,6 @@ class SyncScheduler {
     const track = this.tracks.get(trackId);
     if (!track) return;
 
-    // Update status to fetching
     track.status = "fetching";
     this.notifyListeners();
 
@@ -87,26 +94,46 @@ class SyncScheduler {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      // Get the entire file as a Blob
       const blob = await response.blob();
-      
-      console.log(`[SyncScheduler] 📥 Blob created, size: ${blob.size} bytes, type: ${blob.type}`);
-      
-      // Create a local URL for the blob (this is in-memory, not network)
       const blobUrl = URL.createObjectURL(blob);
       
-      console.log(`[SyncScheduler] ✅ Buffered "${track.track.title}" - Blob URL: ${blobUrl.substring(0, 50)}...`);
+      console.log(`[SyncScheduler] ✅ Buffered "${track.track.title}" - ${blob.size} bytes, type: ${blob.type}`);
       
-      // Update track with blob URL and mark as buffered
       track.blobUrl = blobUrl;
       track.status = "buffered";
       this.notifyListeners();
+
+      // Notify any ready listeners for this track
+      this.readyListeners.forEach(cb => cb(track.trackId));
     } catch (err) {
       console.error(`[SyncScheduler] ❌ Failed to fetch audio:`, err);
       track.status = "failed";
       track.error = err instanceof Error ? err.message : "Unknown error";
       this.notifyListeners();
     }
+  }
+
+  /**
+   * Enable sync-gate mode. The countdown will not trigger playback
+   * until `unlockCountdown()` is called (e.g., when both sides are ready).
+   */
+  enableSyncGate(trackId: string): void {
+    this.waitForSyncGate = true;
+    this.gatingTrackId = trackId;
+    console.log(`[SyncScheduler] 🔒 Sync gate ENABLED for trackId: ${trackId}`);
+  }
+
+  /**
+   * Manually unlock the countdown (call when both host and member are ready).
+   */
+  unlockCountdown(): void {
+    if (!this.waitForSyncGate) {
+      console.log(`[SyncScheduler] unlockCountdown called but gate is not enabled`);
+      return;
+    }
+    console.log(`[SyncScheduler] 🔓 Sync gate UNLOCKED - countdown will proceed`);
+    this.waitForSyncGate = false;
+    this.gatingTrackId = null;
   }
 
   /**
@@ -121,18 +148,14 @@ class SyncScheduler {
     if (!syncedClock.isReady()) {
       console.log(`[SyncScheduler] ⏱️ Countdown started but clock NOT calibrated yet`);
     } else {
-      console.log(`[SyncScheduler] ⏱️ Countdown started - synced now: ${syncedClock.now()}`);
+      console.log(`[SyncScheduler] ⏱️ Countdown started - synced now: ${syncedClock.now()}, syncGate: ${this.waitForSyncGate}`);
     }
 
-    // Check every 10ms for sub-frame precision
     this.countdownInterval = setInterval(() => {
       this.checkAndTrigger();
     }, 10);
   }
 
-  /**
-   * Stop the precision countdown.
-   */
   stopCountdown(): void {
     if (this.countdownInterval) {
       clearInterval(this.countdownInterval);
@@ -152,26 +175,32 @@ class SyncScheduler {
     }
 
     if (!syncedClock.isReady()) {
-      return; // Clock not ready, skip this check
+      return;
     }
 
     const syncedNow = syncedClock.now();
 
-    for (const [trackId, track] of this.tracks.entries()) {
+    for (const [scheduleId, track] of this.tracks.entries()) {
       if (track.status === "playing" || track.status === "failed") continue;
 
       const timeUntilTarget = track.targetSyncedTime - syncedNow;
       
-      // Log countdown every second
       if (timeUntilTarget > 0 && timeUntilTarget <= 5000 && timeUntilTarget % 1000 < 10) {
-        console.log(`[SyncScheduler] ⏱️ Countdown: ${(timeUntilTarget / 1000).toFixed(1)}s until "${track.track.title}" plays`);
+        console.log(`[SyncScheduler] ⏱️ Countdown: ${(timeUntilTarget / 1000).toFixed(1)}s until "${track.track.title}" plays (gate: ${this.waitForSyncGate})`);
       }
 
-      // Check if we've reached the target time
       if (syncedNow >= track.targetSyncedTime) {
+        // If sync gate is enabled, don't trigger yet
+        if (this.waitForSyncGate) {
+          if (timeUntilTarget > -1000) { // Only log occasionally
+            // Don't spam logs every 10ms
+          }
+          continue;
+        }
+
         if (track.blobUrl) {
-          console.log(`[SyncScheduler] 🎵 Target time reached! blobUrl exists. Calling triggerPlayback for "${track.track.title}"`);
-          this.triggerPlayback(trackId, track);
+          console.log(`[SyncScheduler] 🎵 Target time reached! Triggering playback for "${track.track.title}"`);
+          this.triggerPlayback(scheduleId, track);
         } else {
           console.warn(`[SyncScheduler] ⚠️ Target time reached but blobUrl is undefined! Status: ${track.status}`);
         }
@@ -183,7 +212,7 @@ class SyncScheduler {
    * The Drop: Execute playback at the precise synced millisecond.
    * Audio is already in memory, so this triggers instant execution.
    */
-  private triggerPlayback(trackId: string, scheduled: ScheduledTrack): void {
+  private triggerPlayback(scheduleId: string, scheduled: ScheduledTrack): void {
     if (!this.audioElement) {
       console.error("[SyncScheduler] ❌ No audio element in triggerPlayback!");
       return;
@@ -195,20 +224,17 @@ class SyncScheduler {
     }
 
     console.log(`[SyncScheduler] 🎵 THE DROP: Playing "${scheduled.track.title}" at synced time ${syncedClock.now()}`);
-    console.log(`[SyncScheduler] 🎵 Blob URL: ${scheduled.blobUrl.substring(0, 50)}...`);
 
-    // Set the source to the pre-fetched blob
     this.audioElement.src = scheduled.blobUrl;
-    this.audioElement.currentTime = 0; // Start from beginning
+    this.audioElement.currentTime = 0;
     this.audioElement.volume = 1.0;
 
-    // Play!
     const playPromise = this.audioElement.play();
     if (playPromise !== undefined) {
       playPromise.then(() => {
         console.log(`[SyncScheduler] ✅ Play started successfully for "${scheduled.track.title}"`);
         scheduled.status = "playing";
-        this.activeTrackId = trackId;
+        this.activeTrackId = scheduleId;
         this.notifyListeners();
       }).catch(err => {
         console.error(`[SyncScheduler] ❌ Playback failed:`, err);
@@ -217,9 +243,8 @@ class SyncScheduler {
         this.notifyListeners();
       });
     } else {
-      // Older browser that doesn't return a promise
       scheduled.status = "playing";
-      this.activeTrackId = trackId;
+      this.activeTrackId = scheduleId;
       this.notifyListeners();
     }
   }
@@ -229,11 +254,21 @@ class SyncScheduler {
    */
   subscribe(callback: SchedulerListener): () => void {
     this.listeners.push(callback);
-    // Immediately notify with current state
     callback(Array.from(this.tracks.values()));
     
     return () => {
       this.listeners = this.listeners.filter(cb => cb !== callback);
+    };
+  }
+
+  /**
+   * Subscribe to "track ready" events (when a track is fully buffered).
+   * Useful for telling the host "I'm ready, you can start the countdown."
+   */
+  onTrackReady(callback: ReadyListener): () => void {
+    this.readyListeners.push(callback);
+    return () => {
+      this.readyListeners = this.readyListeners.filter(cb => cb !== callback);
     };
   }
 
@@ -249,9 +284,6 @@ class SyncScheduler {
     return this.audioElement;
   }
 
-  /**
-   * Get current active track.
-   */
   getActiveTrack(): ScheduledTrack | null {
     if (!this.activeTrackId) return null;
     return this.tracks.get(this.activeTrackId) || null;
@@ -262,13 +294,14 @@ class SyncScheduler {
    */
   clear(): void {
     this.stopCountdown();
+    this.waitForSyncGate = false;
+    this.gatingTrackId = null;
     
     if (this.audioElement) {
       this.audioElement.pause();
       this.audioElement.src = "";
     }
 
-    // Revoke all blob URLs to free memory
     for (const track of this.tracks.values()) {
       if (track.blobUrl) {
         URL.revokeObjectURL(track.blobUrl);
@@ -280,9 +313,6 @@ class SyncScheduler {
     this.notifyListeners();
   }
 
-  /**
-   * Get all current scheduled tracks.
-   */
   getAllTracks(): ScheduledTrack[] {
     return Array.from(this.tracks.values());
   }
@@ -293,5 +323,4 @@ class SyncScheduler {
   }
 }
 
-// Singleton instance
 export const syncScheduler = new SyncScheduler();

@@ -29,4 +29,8 @@ export type SyncMessage =
   | { type: "CHAT"; sender: string; text: string; time: string }
   | { type: "VETO_TOGGLE"; active: boolean; hostId: string }
   | { type: "KICK_USER"; targetId: string; targetName: string; reason?: string }
-  | { type: "BAN_USER"; targetId: string; targetName: string; reason?: string };
+  | { type: "BAN_USER"; targetId: string; targetName: string; reason?: string }
+  // NEW: Signal that a participant has buffered the current track
+  | { type: "READY"; userId: string; trackId: string; userName: string }
+  // NEW: Host announces a track is being scheduled (gives time to buffer)
+  | { type: "TRACK_PREPARE"; trackId: string; trackIndex: number; queue: Track[] };

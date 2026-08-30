@@ -49,6 +49,13 @@ const Room = () => {
   const [kicked, setKicked] = useState<boolean>(false);
   const [banned, setBanned] = useState<boolean>(false);
 
+  // Sync-gate tracking
+  // hostReady[userId] = true means that user has buffered the current track
+  const [hostReady, setHostReady] = useState<boolean>(false);
+  const [memberReadyMap, setMemberReadyMap] = useState<Record<string, boolean>>({});
+  const [gateOpen, setGateOpen] = useState<boolean>(false);
+  const [waitingForReady, setWaitingForReady] = useState<boolean>(false);
+
   // Audio state - driven by syncScheduler for both host and members
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -64,15 +71,16 @@ const Room = () => {
   const isInitializedRef = useRef(false);
   const lastVetoToastRef = useRef<boolean | null>(null);
   const isClockCalibratedRef = useRef(false);
+  const memberReadyMapRef = useRef<Record<string, boolean>>({});
+  const currentGatingTrackIdRef = useRef<string | null>(null);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
   isShuffleRef.current = isShuffle;
   vetoActiveRef.current = vetoActive;
+  memberReadyMapRef.current = memberReadyMap;
 
   const currentTrack = queue[currentIndex] || null;
-
-  // Convenience: non-host members are "locked" when veto is on
   const controlsLocked = !isHost && vetoActive;
 
   // Subscribe to syncScheduler to track playback state, time, and duration
@@ -96,7 +104,6 @@ const Room = () => {
     const handleEnded = () => {
       console.log("[Room] ⏹️ audioElement ended event fired!");
       setSchedulerIsPlaying(false);
-      // Auto-advance for host
       if (isHost && queueRef.current.length > 0) {
         const nextIdx = isShuffleRef.current
           ? Math.floor(Math.random() * queueRef.current.length)
@@ -105,9 +112,7 @@ const Room = () => {
         setCurrentIndex(nextIdx);
         const nextTrack = queueRef.current[nextIdx];
         if (nextTrack && syncedClock.isReady()) {
-          const targetTime = syncedClock.now() + 2000;
-          syncScheduler.scheduleTrack(nextTrack, targetTime, `track-${nextIdx}`);
-          syncScheduler.startCountdown();
+          scheduleTrackWithGate(nextTrack, nextIdx, 2000);
         }
       }
     };
@@ -118,8 +123,6 @@ const Room = () => {
     audioEl.addEventListener("pause", handlePause);
     audioEl.addEventListener("ended", handleEnded);
 
-    console.log("[Room] Audio element listeners attached");
-
     return () => {
       audioEl.removeEventListener("timeupdate", handleTimeUpdate);
       audioEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
@@ -128,6 +131,27 @@ const Room = () => {
       audioEl.removeEventListener("ended", handleEnded);
     };
   }, [isHost]);
+
+  // When our local buffer is ready, broadcast READY to the room
+  useEffect(() => {
+    const unsubscribe = syncScheduler.onTrackReady((trackId) => {
+      console.log(`[Room] ✅ Local buffer ready for trackId: ${trackId}, broadcasting READY`);
+      broadcast({
+        type: "READY",
+        userId: myId,
+        trackId,
+        userName,
+      });
+      
+      // Mark ourselves as ready locally
+      if (isHost) {
+        setHostReady(true);
+      } else {
+        setMemberReadyMap(prev => ({ ...prev, [myId]: true }));
+      }
+    });
+    return () => unsubscribe();
+  }, [myId, userName, isHost]);
 
   const handleSeek = useCallback((time: number) => {
     const audioEl = syncScheduler.getAudioElement();
@@ -141,27 +165,115 @@ const Room = () => {
     syncScheduler.getAudioElement().muted = next;
   }, [isMuted]);
 
-  // Keep play/pause refs updated
   const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
+  const broadcastRef = useRef<((msg: SyncMessage) => void) | null>(null);
 
   // Phase 1: Calibrate the synced clock when the room is ready
   useEffect(() => {
     if (!myId || !roomCode) return;
     if (isClockCalibratedRef.current) return;
     
-    console.log(`[Room] Starting clock calibration...`);
     isClockCalibratedRef.current = true;
-    
     syncedClock.calibrate(5).then(() => {
       console.log(`[Room] ✅ Clock calibrated, sync ready`);
     });
   }, [myId, roomCode]);
 
-  // Handle state changes from Firebase (PRIMARY sync for playback)
+  /**
+   * The CORE gate logic: schedule a track, but only start countdown
+   * once both host and member have signaled READY.
+   */
+  const scheduleTrackWithGate = useCallback((track: Track, trackIdx: number, delayMs: number = 2000) => {
+    if (!syncedClock.isReady()) {
+      toast.error("Clock not calibrated yet. Please wait...");
+      return;
+    }
+
+    const targetSyncedTime = syncedClock.now() + delayMs;
+    const trackId = `track-${trackIdx}-${Date.now()}`;
+    currentGatingTrackIdRef.current = trackId;
+    
+    console.log(`[Room] 📅 Scheduling "${track.title}" (trackId: ${trackId}) for synced time ${targetSyncedTime}`);
+    
+    // Enable the gate BEFORE scheduling
+    syncScheduler.enableSyncGate(trackId);
+    syncScheduler.scheduleTrack(track, targetSyncedTime, `track-${trackIdx}`, trackId);
+    syncScheduler.startCountdown();
+    
+    setWaitingForReady(true);
+    setGateOpen(false);
+    setHostReady(false);
+    setMemberReadyMap({});
+    memberReadyMapRef.current = {};
+
+    // Announce to the room: prepare to play this track
+    broadcastRef.current?.({
+      type: "TRACK_PREPARE",
+      trackId,
+      trackIndex: trackIdx,
+      queue: queueRef.current,
+    });
+
+    // Also broadcast state so non-host members can fetch
+    updatePlaybackStateRef.current?.({
+      currentTrackIndex: trackIdx,
+      queue: queueRef.current,
+      targetSyncedTime,
+      isPlaying: false,
+    });
+
+    setCurrentIndex(trackIdx);
+  }, []);
+
+  /**
+   * Check if all parties are ready, and if so, unlock the gate.
+   * Called whenever ready state changes.
+   */
+  const evaluateGate = useCallback(() => {
+    if (!currentGatingTrackIdRef.current) return;
+    if (!isHost) return; // Only host decides when to unlock
+
+    const otherMembers = users.filter(u => !u.isHost);
+    
+    // If no other members in the room, host is the only one — proceed
+    if (otherMembers.length === 0) {
+      console.log(`[Room] 🚪 No other members — host ready alone is enough, unlocking gate`);
+      syncScheduler.unlockCountdown();
+      setGateOpen(true);
+      setWaitingForReady(false);
+      return;
+    }
+
+    // Check: is host ready AND all members ready?
+    const allMembersReady = otherMembers.every(m => memberReadyMapRef.current[m.id]);
+    
+    if (hostReady && allMembersReady) {
+      console.log(`[Room] 🚪 All parties ready! Unlocking countdown gate.`);
+      syncScheduler.unlockCountdown();
+      setGateOpen(true);
+      setWaitingForReady(false);
+      // Tell members they can drop
+      broadcastRef.current?.({
+        type: "READY",
+        userId: "host-gate-open",
+        trackId: currentGatingTrackIdRef.current,
+        userName: "host",
+      });
+    } else {
+      const waiting = otherMembers.filter(m => !memberReadyMapRef.current[m.id]).map(m => m.name);
+      console.log(`[Room] 🚪 Gate still closed. Host ready: ${hostReady}, waiting on: ${waiting.join(", ")}`);
+    }
+  }, [isHost, users, hostReady]);
+
+  // Re-evaluate gate whenever readiness changes
+  useEffect(() => {
+    evaluateGate();
+  }, [hostReady, memberReadyMap, users, evaluateGate]);
+
+  // Handle state changes from Firebase
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     console.log(`[Room] State change received:`, JSON.stringify(state, null, 2));
     
-    // Only non-host members should follow host's state
     if (isHost) return;
     
     const newIndex = state.currentTrackIndex ?? 0;
@@ -170,13 +282,10 @@ const Room = () => {
     const newTargetSyncedTime = state.targetSyncedTime;
     const newIsPlaying = state.isPlaying ?? false;
     
-    // Update queue if different
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
-      console.log(`[Room] Updating queue from state: ${newQueue.length} tracks`);
       setQueue(newQueue);
     }
     
-    // Handle veto state change - show toast ONLY when it changes
     if (newVetoActive !== vetoActiveRef.current) {
       setVetoActive(newVetoActive);
       if (lastVetoToastRef.current !== null) {
@@ -189,52 +298,35 @@ const Room = () => {
       lastVetoToastRef.current = newVetoActive;
     }
     
-    // Handle scheduled track from host - this is the PRIMARY sync mechanism
     if (newTargetSyncedTime && newIndex !== undefined) {
       const trackToSchedule = newQueue[newIndex];
       if (trackToSchedule) {
-        console.log(`[Room] 📅 MEMBER: Received scheduled track: "${trackToSchedule.title}" at synced time ${newTargetSyncedTime}`);
-        console.log(`[Room] 📅 MEMBER: Current synced time: ${syncedClock.now()}, Clock ready: ${syncedClock.isReady()}`);
+        console.log(`[Room] 📅 MEMBER: Received scheduled track: "${trackToSchedule.title}"`);
         
-        // Clear any existing scheduled tracks first
         syncScheduler.clear();
         
-        // Schedule the track
-        syncScheduler.scheduleTrack(trackToSchedule, newTargetSyncedTime, `track-${newIndex}`);
+        const trackId = `track-${newIndex}-${Date.now()}`;
+        currentGatingTrackIdRef.current = trackId;
+        syncScheduler.enableSyncGate(trackId);
+        syncScheduler.scheduleTrack(trackToSchedule, newTargetSyncedTime, `track-${newIndex}`, trackId);
         syncScheduler.startCountdown();
         
         setCurrentIndex(newIndex);
-        
-        // If the target time has already passed, trigger immediately
-        if (syncedClock.isReady() && syncedClock.now() >= newTargetSyncedTime) {
-          console.log(`[Room] 📅 MEMBER: Target time already passed, triggering immediately`);
-          // Force trigger by checking the scheduler
-          const audioEl = syncScheduler.getAudioElement();
-          const scheduledTrack = syncScheduler.getAllTracks()[0];
-          if (scheduledTrack && scheduledTrack.blobUrl) {
-            audioEl.src = scheduledTrack.blobUrl;
-            audioEl.currentTime = 0;
-            audioEl.play().catch(console.error);
-          }
-        }
+        setWaitingForReady(true);
+        setGateOpen(false);
+        setMemberReadyMap({});
+        memberReadyMapRef.current = {};
       }
     } else if (newIndex !== currentIndexRef.current) {
-      // Track change without scheduled time - just update the index
-      console.log(`[Room] MEMBER: Track change (no schedule): ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
     }
 
-    // Handle play/pause commands (for immediate response when not using scheduled sync)
     if (newIsPlaying && !newTargetSyncedTime) {
       const audioEl = syncScheduler.getAudioElement();
-      if (audioEl.paused) {
-        audioEl.play().catch(console.error);
-      }
+      if (audioEl.paused) audioEl.play().catch(console.error);
     } else if (!newIsPlaying && !newTargetSyncedTime) {
       const audioEl = syncScheduler.getAudioElement();
-      if (!audioEl.paused) {
-        audioEl.pause();
-      }
+      if (!audioEl.paused) audioEl.pause();
     }
   }, [isHost]);
 
@@ -246,6 +338,43 @@ const Room = () => {
       case "USER_LIST":
         setUsers(msg.users);
         break;
+        
+      case "READY": {
+        // A participant (or host) has buffered the current track
+        if (msg.userId === "host-gate-open") {
+          // Host says: gate is open, you can play
+          console.log(`[Room] 🚪 Host says gate is open!`);
+          syncScheduler.unlockCountdown();
+          setGateOpen(true);
+          setWaitingForReady(false);
+        } else {
+          // A member has buffered the track
+          console.log(`[Room] ✅ Member ${msg.userName} (${msg.userId}) is ready`);
+          if (msg.trackId === currentGatingTrackIdRef.current) {
+            setMemberReadyMap(prev => {
+              const next = { ...prev, [msg.userId]: true };
+              memberReadyMapRef.current = next;
+              return next;
+            });
+          }
+        }
+        break;
+      }
+        
+      case "TRACK_PREPARE": {
+        // Host is preparing a new track — clear our state
+        console.log(`[Room] 📥 Host preparing track: ${msg.trackId}`);
+        currentGatingTrackIdRef.current = msg.trackId;
+        syncScheduler.clear();
+        
+        if (msg.queue) setQueue(msg.queue);
+        setCurrentIndex(msg.trackIndex);
+        setWaitingForReady(true);
+        setGateOpen(false);
+        setMemberReadyMap({});
+        memberReadyMapRef.current = {};
+        break;
+      }
         
       case "KICK_USER": {
         if (msg.targetId === myId) {
@@ -271,14 +400,11 @@ const Room = () => {
     }
   }, [myId]);
 
-  // Handle session ended
   const handleSessionEnded = useCallback(() => {
-    console.log(`[Room] Session ended`);
     setSessionEnded(true);
   }, []);
 
-  // Firebase sync hook
-  const { isConnected, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
+  const { isConnected, broadcast, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
     roomCode,
     myId,
     userName,
@@ -291,12 +417,11 @@ const Room = () => {
     onSessionEnded: handleSessionEnded,
   });
 
-  // Store refs
   useEffect(() => {
     updatePlaybackStateRef.current = updatePlaybackState;
-  }, [updatePlaybackState]);
+    broadcastRef.current = broadcast;
+  }, [updatePlaybackState, broadcast]);
 
-  // Initialize connection
   useEffect(() => {
     if (!roomCode) return;
 
@@ -304,11 +429,9 @@ const Room = () => {
       ? `host-${roomCode.toLowerCase()}`
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
-    console.log(`[Room] Initializing with ID: ${generatedId}`);
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
-  // Cleanup scheduler on unmount
   useEffect(() => {
     return () => {
       syncScheduler.clear();
@@ -321,42 +444,36 @@ const Room = () => {
     isInitializedRef.current = true;
 
     const loadInitialState = async () => {
-      console.log(`[Room] MEMBER: Loading initial state...`);
-      
       try {
         const state = await getState();
         if (state) {
-          console.log(`[Room] MEMBER: Got initial state:`, JSON.stringify(state, null, 2));
-          
-          if (state.queue && state.queue.length > 0) {
-            setQueue(state.queue);
-          }
-          
-          if (state.currentTrackIndex !== undefined) {
-            setCurrentIndex(state.currentTrackIndex);
-          }
-          
+          if (state.queue && state.queue.length > 0) setQueue(state.queue);
+          if (state.currentTrackIndex !== undefined) setCurrentIndex(state.currentTrackIndex);
           if (state.vetoActive !== undefined) {
             setVetoActive(state.vetoActive);
             lastVetoToastRef.current = state.vetoActive;
           }
 
-          // If host has a scheduled track, schedule it locally too
+          // If host has a scheduled track that is still in the future, schedule it
           if (state.targetSyncedTime && state.queue && state.queue[state.currentTrackIndex]) {
-            console.log(`[Room] MEMBER: Scheduling existing track from initial state`);
-            syncScheduler.scheduleTrack(
-              state.queue[state.currentTrackIndex],
-              state.targetSyncedTime,
-              `track-${state.currentTrackIndex}`
-            );
-            syncScheduler.startCountdown();
+            if (syncedClock.isReady() && syncedClock.now() < state.targetSyncedTime) {
+              const trackId = `track-${state.currentTrackIndex}-${Date.now()}`;
+              currentGatingTrackIdRef.current = trackId;
+              syncScheduler.enableSyncGate(trackId);
+              syncScheduler.scheduleTrack(
+                state.queue[state.currentTrackIndex],
+                state.targetSyncedTime,
+                `track-${state.currentTrackIndex}`,
+                trackId
+              );
+              syncScheduler.startCountdown();
+              setWaitingForReady(true);
+            }
           }
         }
         
         const userList = await getUsers();
-        if (userList.length > 0) {
-          setUsers(userList);
-        }
+        if (userList.length > 0) setUsers(userList);
       } catch (err) {
         console.error(`[Room] MEMBER: Error loading initial state:`, err);
       }
@@ -364,40 +481,6 @@ const Room = () => {
 
     loadInitialState();
   }, [isConnected, myId, isHost, getState, getUsers]);
-
-  /**
-   * Phase 2: Host schedules a track with a synced target time.
-   * This is the main entry point for the host to start a track.
-   */
-  const scheduleTrackForPlayback = useCallback((trackIdx: number, delayMs: number = 2000) => {
-    if (!isHost) return;
-    if (!syncedClock.isReady()) {
-      toast.error("Clock not calibrated yet. Please wait...");
-      return;
-    }
-
-    const track = queueRef.current[trackIdx];
-    if (!track) return;
-
-    // Calculate the target synced time (now + delay)
-    const targetSyncedTime = syncedClock.now() + delayMs;
-    
-    console.log(`[Room] 📅 HOST scheduling "${track.title}" for synced time ${targetSyncedTime} (in ${delayMs}ms)`);
-    
-    // Schedule locally (host's own playback)
-    syncScheduler.scheduleTrack(track, targetSyncedTime, `track-${trackIdx}`);
-    syncScheduler.startCountdown();
-    
-    // Broadcast to all members
-    updatePlaybackStateRef.current?.({
-      currentTrackIndex: trackIdx,
-      queue: queueRef.current,
-      targetSyncedTime,
-      isPlaying: false, // Will be triggered by scheduler
-    });
-
-    setCurrentIndex(trackIdx);
-  }, [isHost]);
 
   const handleTogglePlay = useCallback(() => {
     if (!isHost) {
@@ -408,17 +491,16 @@ const Room = () => {
     const audioEl = syncScheduler.getAudioElement();
     
     if (!audioEl.paused) {
-      // Currently playing -> pause
       audioEl.pause();
+      syncScheduler.stopCountdown();
       updatePlaybackStateRef.current?.({
         isPlaying: false,
         targetSyncedTime: undefined,
       });
     } else {
-      // Not playing -> schedule current track
-      scheduleTrackForPlayback(currentIndexRef.current, 2000);
+      scheduleTrackWithGate(currentIndexRef.current, 2000);
     }
-  }, [isHost, scheduleTrackForPlayback]);
+  }, [isHost, scheduleTrackWithGate]);
 
   const handleNext = useCallback(() => {
     if (!isHost) {
@@ -431,9 +513,8 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
-    // Schedule next track with synced clock (2s buffer for pre-fetch)
-    scheduleTrackForPlayback(nextIdx, 2000);
-  }, [isHost, isShuffle, scheduleTrackForPlayback]);
+    scheduleTrackWithGate(nextIdx, 2000);
+  }, [isHost, isShuffle, scheduleTrackWithGate]);
 
   const handlePrevious = useCallback(() => {
     if (!isHost) {
@@ -446,15 +527,15 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
-    scheduleTrackForPlayback(prevIdx, 2000);
-  }, [isHost, isShuffle, scheduleTrackForPlayback]);
+    scheduleTrackWithGate(prevIdx, 2000);
+  }, [isHost, isShuffle, scheduleTrackWithGate]);
 
   const handleTrackClick = useCallback((idx: number) => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
       return;
     }
-    scheduleTrackForPlayback(idx, 2000);
+    scheduleTrackWithGate(idx, 2000);
   }, [isHost, scheduleTrackForPlayback]);
 
   const handleSeekFromBar = useCallback((time: number) => {
@@ -462,7 +543,6 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-    // Seek the scheduler's audio element
     const schedulerAudio = syncScheduler.getAudioElement();
     schedulerAudio.currentTime = time;
     updatePlaybackStateRef.current?.({
@@ -470,7 +550,6 @@ const Room = () => {
     });
   }, [isHost]);
 
-  // Queue management - Add is open to all even during veto
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
       id: `track-${Date.now()}`,
@@ -511,7 +590,6 @@ const Room = () => {
     toast.success(`Loaded: ${file.name}`);
   }, [userName, isHost]);
 
-  // Reorder & Remove - locked for non-host members during veto
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
     if (!isHost) {
       if (controlsLocked) {
@@ -566,7 +644,6 @@ const Room = () => {
     });
   }, [isHost]);
 
-  // Host toggles veto
   const handleToggleVeto = useCallback(() => {
     if (!isHost) return;
     const next = !vetoActiveRef.current;
@@ -604,7 +681,6 @@ const Room = () => {
     navigate("/");
   };
 
-  // Session Ended Screen
   if (sessionEnded) {
     return (
       <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
@@ -628,7 +704,6 @@ const Room = () => {
     );
   }
 
-  // Kicked Screen
   if (kicked) {
     return (
       <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
@@ -652,7 +727,6 @@ const Room = () => {
     );
   }
 
-  // Banned Screen
   if (banned) {
     return (
       <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
@@ -676,9 +750,15 @@ const Room = () => {
     );
   }
 
+  // Determine gate status display
+  const otherMembers = users.filter(u => !u.isHost);
+  const readyCount = (isHost ? (hostReady ? 1 : 0) : 0) + 
+    otherMembers.filter(m => memberReadyMap[m.id]).length;
+  const totalCount = (isHost ? 1 : 0) + otherMembers.length;
+  const showGateStatus = waitingForReady && !gateOpen;
+
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
-      {/* Header */}
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
         <div className="flex items-center gap-2">
           <img src="/logo.gif" alt="Meoww" className="w-8 h-8 object-contain" />
@@ -701,15 +781,24 @@ const Room = () => {
         </div>
       </header>
 
-      {/* Offline Banner */}
       {!isConnected && <OfflineBanner onRetry={handleRetry} />}
 
-      {/* Main Layout */}
+      {/* Sync gate banner */}
+      {showGateStatus && (
+        <div className="bg-blue-50 border-b border-blue-300 px-6 py-2.5 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-sm font-mono text-blue-900">
+            <span className="w-2 h-2 bg-blue-600 animate-pulse"></span>
+            <span>Syncing audio... {readyCount}/{totalCount} ready</span>
+          </div>
+          <span className="text-xs font-mono text-blue-700">
+            {totalCount === readyCount ? "All set!" : "Buffering..."}
+          </span>
+        </div>
+      )}
+
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Player */}
         <div className="lg:col-span-7 space-y-6">
           <div className="border border-black bg-white p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-            {/* Status */}
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 text-xs font-mono">
               <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 ${isConnected ? "bg-black" : "bg-red-500"} animate-pulse`}></span>
@@ -746,11 +835,9 @@ const Room = () => {
             />
           </div>
 
-          {/* Sync Status Panel */}
           <SyncStatusPanel isHost={isHost} />
         </div>
 
-        {/* Right Column */}
         <div className="lg:col-span-5 space-y-6">
           <UserList
             users={users}
