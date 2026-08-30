@@ -31,6 +31,7 @@ class FirebaseSignaling {
   private roomRef: any = null;
   private userRef: any = null;
   private stateRef: any = null;
+  private usersRef: any = null;
   private connected: boolean = false;
 
   constructor(roomCode: string, myId: string, myName: string, isHost: boolean) {
@@ -55,13 +56,14 @@ class FirebaseSignaling {
         this.roomRef = ref(db, `rooms/${this.roomCode}`);
         this.userRef = ref(db, `rooms/${this.roomCode}/users/${this.myId}`);
         this.stateRef = ref(db, `rooms/${this.roomCode}/state`);
+        this.usersRef = ref(db, `rooms/${this.roomCode}/users`);
 
         // Set up my user presence
         const userData = {
           id: this.myId,
           name: this.myName,
           isHost: this.isHost,
-          joinedAt: Date.now(),
+          joinedAt: serverTimestamp(),
           lastSeen: serverTimestamp()
         };
 
@@ -78,6 +80,20 @@ class FirebaseSignaling {
           if (this.isHost) {
             this.initializeRoomState();
           }
+
+          // Subscribe to user list changes - ALWAYS fires with current data
+          onValue(this.usersRef, (snapshot: any) => {
+            const usersData = snapshot.val();
+            if (usersData) {
+              const users: RoomUser[] = Object.values(usersData);
+              console.log("👥 Users in room:", users.length, users.map(u => u.name));
+              this.notifyMessage({ type: "USER_LIST", users });
+            } else {
+              this.notifyMessage({ type: "USER_LIST", users: [] });
+            }
+          }, (error: any) => {
+            console.warn("Users ref read error:", error);
+          });
           
           // Subscribe to room state changes
           onValue(this.stateRef, (snapshot: any) => {
@@ -87,23 +103,19 @@ class FirebaseSignaling {
             }
           });
 
-          // Subscribe to user list changes
-          onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
-            const usersData = snapshot.val();
-            if (usersData) {
-              const users: RoomUser[] = Object.values(usersData);
-              this.notifyMessage({ type: "USER_LIST", users });
+          // Subscribe to chat/message stream
+          const messagesRef = ref(db, `rooms/${this.roomCode}/messages`);
+          onValue(messagesRef, (snapshot: any) => {
+            const messages = snapshot.val();
+            if (messages) {
+              Object.values(messages).forEach((msg: any) => {
+                if (msg.senderId !== this.myId) {
+                  // Remove internal fields before sending
+                  const { senderId, senderName, timestamp, ...syncMsg } = msg;
+                  this.notifyMessage(syncMsg as SyncMessage);
+                }
+              });
             }
-          });
-
-          // Check if room exists and get host info
-          onValue(this.roomRef, (snapshot: any) => {
-            const roomData = snapshot.val();
-            if (roomData && roomData.state) {
-              this.notifyStateChange(roomData.state);
-            }
-          }, (error: any) => {
-            console.warn("Room state read error:", error);
           });
 
           resolve();
@@ -181,22 +193,6 @@ class FirebaseSignaling {
   // Subscribe to sync messages
   onMessage(callback: (msg: SyncMessage) => void) {
     this.listeners.push(callback);
-    
-    if (!db) return;
-    
-    const messagesRef = ref(db, `rooms/${this.roomCode}/messages`);
-    onValue(messagesRef, (snapshot: any) => {
-      const messages = snapshot.val();
-      if (messages) {
-        Object.values(messages).forEach((msg: any) => {
-          if (msg.senderId !== this.myId) {
-            // Remove internal fields before sending
-            const { senderId, senderName, timestamp, ...syncMsg } = msg;
-            callback(syncMsg as SyncMessage);
-          }
-        });
-      }
-    });
   }
 
   // Subscribe to state changes
@@ -248,11 +244,10 @@ class FirebaseSignaling {
 
   // Get current users in room
   async getUsers(): Promise<RoomUser[]> {
-    if (!db) return [];
+    if (!db || !this.usersRef) return [];
     
     return new Promise((resolve) => {
-      const usersRef = ref(db, `rooms/${this.roomCode}/users`);
-      onValue(usersRef, (snapshot: any) => {
+      onValue(this.usersRef, (snapshot: any) => {
         const usersData = snapshot.val();
         resolve(usersData ? Object.values(usersData) : []);
       }, { onlyOnce: true } as any);
