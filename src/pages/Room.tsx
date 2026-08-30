@@ -39,6 +39,7 @@ const Room = () => {
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
 
   // Veto (host's "Let others change what's playing" toggle)
+  // DEFAULT: false = members CAN control playback (toggle is OFF)
   const [vetoActive, setVetoActive] = useState<boolean>(false);
 
   // Session state
@@ -61,7 +62,8 @@ const Room = () => {
 
   const currentTrack = queue[currentIndex] || null;
 
-  // Convenience: non-host members are "locked" when veto is on
+  // Convenience: non-host members are "locked" only when veto is ON
+  // Since veto starts as false, members can control playback by default
   const controlsLocked = !isHost && vetoActive;
 
   // Handle track end - advance to next track
@@ -396,7 +398,9 @@ const Room = () => {
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
   }, [queue, currentIndex, broadcast, requireControlAccess]);
 
-  // Host toggles the "Power of Veto"
+  // Host toggles the "Power of Veto" (Let others change what's playing)
+  // Default state: OFF — members CAN control playback
+  // When turned ON: members are restricted to add-only mode
   const handleToggleVeto = useCallback(() => {
     if (!isHost) return;
     const next = !vetoActiveRef.current;
