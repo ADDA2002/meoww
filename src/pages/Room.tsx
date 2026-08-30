@@ -11,10 +11,8 @@ import { formatTime } from "@/lib/utils";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
-// Host broadcasts every 200ms — fast enough for tight sync, light on the network
-const SYNC_TICK_MS = 200;
-// Only correct member drift if it's more than 0.15s off (was 0.3s)
-const RESYNC_THRESHOLD_SEC = 0.15;
+const SYNC_TICK_MS = 500;
+const RESYNC_THRESHOLD_SEC = 0.3;
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -53,10 +51,8 @@ const Room = () => {
 
   const currentTrack = queue[currentIndex] || null;
 
-  // Broadcast current state to Firebase.
-  // Use `sendFull: true` for play/pause/track-change events so member gets queue too;
-  // routine position ticks only send currentTrackIndex + time (small payload = low latency).
-  const broadcastState = useCallback((extra?: Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean; sendFull?: boolean }) => {
+  // Broadcast current state to Firebase
+  const broadcastState = useCallback((extra?: Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean }) => {
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -64,25 +60,15 @@ const Room = () => {
       ? extra.explicitIsPlaying
       : !audio.paused;
 
-    const { explicitIsPlaying, sendFull, ...rest } = (extra || {}) as Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean; sendFull?: boolean };
+    const { explicitIsPlaying, ...rest } = (extra || {}) as Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean };
 
-    if (sendFull) {
-      updatePlaybackStateRef.current?.({
-        currentTrackIndex: currentIndexRef.current,
-        queue: queueRef.current,
-        isPlaying: playing,
-        currentTime: audio.currentTime,
-        ...rest,
-      });
-    } else {
-      // Routine position tick: skip the queue to keep payload tiny
-      updatePlaybackStateRef.current?.({
-        currentTrackIndex: currentIndexRef.current,
-        isPlaying: playing,
-        currentTime: audio.currentTime,
-        ...rest,
-      });
-    }
+    updatePlaybackStateRef.current?.({
+      currentTrackIndex: currentIndexRef.current,
+      queue: queueRef.current,
+      isPlaying: playing,
+      currentTime: audio.currentTime,
+      ...rest,
+    });
   }, []);
 
   // Play a track from the beginning — used for next/prev buttons and auto-play
@@ -106,13 +92,12 @@ const Room = () => {
 
     audio.play().catch(console.error);
 
-    // sendFull: true because the index changed — member needs the queue context
-    broadcastState({ currentTrackIndex: idx, explicitIsPlaying: true, sendFull: true });
+    // Immediate broadcast — explicitly pass isPlaying=true since audio.play()
+    // fires async and React's isPlaying state hasn't updated yet
+    broadcastState({ currentTrackIndex: idx, explicitIsPlaying: true });
   }, [broadcastState]);
 
-  // Handle state changes from Firebase (member side only).
-  // Apply play/pause and track change INSTANTLY when state arrives —
-  // don't wait for the drift-correction loop.
+  // Handle state changes from Firebase (member side only)
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     if (isHostRef.current) return;
 
@@ -151,7 +136,6 @@ const Room = () => {
     setCurrentIndex(newIndex);
 
     if (urlChanged || indexChanged) {
-      // New track — load, set position, and play/pause instantly
       audio.src = track.url;
       audio.load();
       audio.currentTime = expectedTime;
@@ -169,7 +153,7 @@ const Room = () => {
         setCurrentTime(expectedTime);
       }
 
-      // Apply play/pause instantly (no waiting for next tick)
+      // Apply play/pause
       if (state.isPlaying && wasPaused) {
         audio.play().catch(console.error);
       } else if (!state.isPlaying && !wasPaused) {
@@ -266,7 +250,7 @@ const Room = () => {
   // Continuous position broadcast (host) + drift correction (member)
   useEffect(() => {
     if (!isHost) {
-      // Member: periodically correct drift only (play/pause is handled instantly above)
+      // Member: periodically correct drift
       const interval = setInterval(() => {
         const audio = audioRef.current;
         const state = lastSyncStateRef.current;
@@ -281,16 +265,17 @@ const Room = () => {
           audio.currentTime = expectedTime;
           setCurrentTime(expectedTime);
         }
-      }, SYNC_TICK_MS);
+      }, 500);
       return () => clearInterval(interval);
     }
 
-    // Host: broadcast position every SYNC_TICK_MS (no queue — small payload = lower latency)
+    // Host: broadcast position every 500ms
     const interval = setInterval(() => {
       const audio = audioRef.current;
       if (!audio) return;
       updatePlaybackStateRef.current?.({
         currentTrackIndex: currentIndexRef.current,
+        queue: queueRef.current,
         isPlaying: !audio.paused,
         currentTime: audio.currentTime,
       });
@@ -313,7 +298,7 @@ const Room = () => {
       willBePlaying = true;
     }
 
-    // Broadcast immediately — small payload (no queue) for fastest delivery
+    // Broadcast immediately with the correct playing state
     updatePlaybackStateRef.current?.({
       isPlaying: willBePlaying,
       currentTime: audio.currentTime,
@@ -344,11 +329,7 @@ const Room = () => {
       const t = parseFloat(e.target.value);
       audioRef.current.currentTime = t;
       setCurrentTime(t);
-      // Send position immediately so the member follows the seek without waiting
-      updatePlaybackStateRef.current?.({
-        currentTime: t,
-        isPlaying: !audioRef.current.paused,
-      });
+      updatePlaybackStateRef.current?.({ currentTime: t });
     }
   }, []);
 
