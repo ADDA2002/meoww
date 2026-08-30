@@ -61,7 +61,12 @@ const Room = () => {
       audio.load();
     }
 
-    audio.play().catch(console.error);
+    // Wait for audio to be ready before playing
+    const handleCanPlay = () => {
+      audio.removeEventListener("canplay", handleCanPlay);
+      audio.play().catch(console.error);
+    };
+    audio.addEventListener("canplay", handleCanPlay);
 
     updatePlaybackStateRef.current?.({
       currentTrackIndex: idx,
