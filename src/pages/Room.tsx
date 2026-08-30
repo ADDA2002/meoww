@@ -50,6 +50,9 @@ const Room = () => {
 
   const currentTrack = queue[currentIndex] || null;
 
+  // Track initial mount to prevent auto-play on first load
+  const isInitialMount = useRef(true);
+
   // Handle track end - advance to next track (host only)
   const handleTrackEnded = useCallback(() => {
     if (!isHostRef.current) return;
@@ -82,10 +85,17 @@ const Room = () => {
   });
 
   // Auto-play when track changes (for host auto-advance)
+  // Don't auto-play on initial mount - user must press play
   useEffect(() => {
     if (!isHost || !currentTrack) return;
     
-    // Try to play whenever currentIndex changes
+    // Skip auto-play on first render
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    
+    // Try to play whenever currentIndex changes (skip, previous, auto-advance)
     play().catch((err) => {
       console.warn("Auto-play after track change failed:", err);
     });
