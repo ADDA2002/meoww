@@ -38,23 +38,20 @@ const Room = () => {
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
 
   // Sync refs
-  const isHostRef = useRef(isHost);
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
   const isInitialMount = useRef(true);
   const isReorderingRef = useRef(false); // Track if we're reordering to prevent auto-play
 
-  isHostRef.current = isHost;
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
   isShuffleRef.current = isShuffle;
 
   const currentTrack = queue[currentIndex] || null;
 
-  // Handle track end - advance to next track (host only)
+  // Handle track end - advance to next track
   const handleTrackEnded = useCallback(() => {
-    if (!isHostRef.current) return;
     if (queueRef.current.length === 0) return;
 
     const nextIdx = isShuffleRef.current
@@ -83,9 +80,9 @@ const Room = () => {
     onTrackEnded: handleTrackEnded,
   });
 
-  // Auto-play when track changes (for host auto-advance) - skip initial mount and reordering
+  // Auto-play when track changes (for auto-advance) - skip initial mount and reordering
   useEffect(() => {
-    if (!isHost || !currentTrack) return;
+    if (!currentTrack) return;
     
     // Don't auto-play on initial mount
     if (isInitialMount.current) {
@@ -103,7 +100,7 @@ const Room = () => {
     play().catch((err) => {
       console.warn("Auto-play after track change failed:", err);
     });
-  }, [currentIndex, isHost, currentTrack, play]);
+  }, [currentIndex, currentTrack, play]);
 
   // Handle sync messages
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
@@ -112,29 +109,23 @@ const Room = () => {
         setUsers(msg.users);
         break;
       case "PLAY": {
-        if (!isHostRef.current) {
-          if (currentIndexRef.current !== msg.trackIndex) {
-            setCurrentIndex(msg.trackIndex);
-          }
-          const latency = (Date.now() - msg.timestamp) / 1000;
-          const targetTime = msg.seekTime + latency;
-          seek(targetTime);
-          play();
+        if (currentIndexRef.current !== msg.trackIndex) {
+          setCurrentIndex(msg.trackIndex);
         }
+        const latency = (Date.now() - msg.timestamp) / 1000;
+        const targetTime = msg.seekTime + latency;
+        seek(targetTime);
+        play();
         break;
       }
       case "PAUSE": {
-        if (!isHostRef.current) {
-          seek(msg.seekTime);
-          pause();
-        }
+        seek(msg.seekTime);
+        pause();
         break;
       }
       case "SEEK": {
-        if (!isHostRef.current) {
-          const latency = (Date.now() - msg.timestamp) / 1000;
-          seek(msg.seekTime + latency);
-        }
+        const latency = (Date.now() - msg.timestamp) / 1000;
+        seek(msg.seekTime + latency);
         break;
       }
       case "UPDATE_QUEUE": {
@@ -263,8 +254,6 @@ const Room = () => {
   }, [queue.length, isShuffle, currentIndex]);
 
   const handleTrackClick = useCallback((idx: number) => {
-    if (!isHost) return;
-
     // Update index first
     setCurrentIndex(idx);
     
@@ -278,7 +267,7 @@ const Room = () => {
       playRef.current();
       broadcastRef.current({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
     }, 50);
-  }, [isHost]);
+  }, []);
 
   // Queue management
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
@@ -314,9 +303,6 @@ const Room = () => {
   }, [queue, currentIndex, userName, broadcast]);
 
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
-    // Only hosts can reorder
-    if (!isHost) return;
-    
     if (direction === "up" && idx === 0) return;
     if (direction === "down" && idx === queue.length - 1) return;
 
@@ -334,12 +320,9 @@ const Room = () => {
     setQueue(newQueue);
     setCurrentIndex(newActive);
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
-  }, [queue, currentIndex, isHost, broadcast]);
+  }, [queue, currentIndex, broadcast]);
 
   const handleRemoveTrack = useCallback((idx: number) => {
-    // Only hosts can remove tracks
-    if (!isHost) return;
-    
     if (queue.length <= 1) {
       toast.error("Queue must have at least one track.");
       return;
@@ -352,7 +335,7 @@ const Room = () => {
     setQueue(newQueue);
     setCurrentIndex(newActive);
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
-  }, [queue, currentIndex, isHost, broadcast]);
+  }, [queue, currentIndex, broadcast]);
 
   const handleTransferHost = useCallback((targetUserId: string) => {
     if (!isHost) return;

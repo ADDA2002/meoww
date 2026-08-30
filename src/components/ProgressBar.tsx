@@ -22,7 +22,7 @@ export function ProgressBar({ currentTime, duration, isHost, isConnected, onSeek
         max={duration || 100}
         value={currentTime}
         onChange={handleSeek}
-        disabled={!isHost || !isConnected}
+        disabled={!isConnected}
         className="w-full accent-black cursor-pointer bg-gray-200 h-1.5 appearance-none border border-black disabled:opacity-50"
       />
       <div className="flex justify-between text-xs font-mono text-gray-500">
