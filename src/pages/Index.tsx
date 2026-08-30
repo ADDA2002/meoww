@@ -227,6 +227,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between relative overflow-hidden">
+      {/* Home screen header - shows logo and SYNCED */}
       <Header />
 
       {/* Main Container */}

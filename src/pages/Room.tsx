@@ -12,10 +12,13 @@ import {
   ArrowUp, 
   ArrowDown, 
   Trash2, 
+  Radio, 
   Music, 
   Upload, 
   Users,
-  AlertCircle
+  AlertCircle,
+  Menu,
+  X
 } from "lucide-react";
 import Peer, { DataConnection } from "peerjs";
 import { toast } from "sonner";
@@ -692,7 +695,8 @@ const Room = () => {
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
-      <Header />
+      {/* Room page header - shows drawer button instead of logo/SYNCED */}
+      <Header showDrawerButton={true} />
 
       {/* Main Room Layout */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
