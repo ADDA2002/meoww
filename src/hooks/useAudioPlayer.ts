@@ -33,6 +33,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
 
     audio.addEventListener("loadedmetadata", () => {
       setDuration(audio.duration);
+      setIsLoaded(true);
     });
 
     audio.addEventListener("canplay", () => {
@@ -88,24 +89,16 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     }
   }, [isMuted]);
 
-  // Stable play function - does NOT depend on isLoaded state
-  // This prevents the auto-play useEffect from re-running when isLoaded changes
   const play = useCallback(async () => {
     const audio = audioRef.current;
     if (!audio) return;
 
     try {
-      // Check audio's ready state directly from the element, NOT from React state
-      // This avoids triggering re-renders and stale closures
-      if (audio.readyState < 3) {
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error("Audio load timeout"));
-          }, 10000); // 10 second timeout
-
+      // Wait for audio to be ready if not loaded
+      if (!isLoaded) {
+        await new Promise<void>((resolve) => {
           const checkLoaded = () => {
-            if (audio.readyState >= 3) {
-              clearTimeout(timeout);
+            if (audio.readyState >= 3) { // HAVE_FUTURE_DATA
               resolve();
             } else {
               setTimeout(checkLoaded, 50);
@@ -121,7 +114,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
       console.error("Play failed:", err);
       setIsPlaying(false);
     }
-  }, []); // Empty deps - this function never changes reference
+  }, [isLoaded]);
 
   const pause = useCallback(() => {
     const audio = audioRef.current;
