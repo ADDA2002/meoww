@@ -20,17 +20,13 @@ const Room = () => {
   const initialName = formatDisplayName(searchParams.get("name") || "Guest");
   const initialIsHost = searchParams.get("host") === "true";
 
-  // User states
   const [myId, setMyId] = useState<string>("");
   const [userName] = useState<string>(initialName);
   const isHost = initialIsHost;
 
-  // Queue states
   const [queue, setQueue] = useState<Track[]>(DEFAULT_TRACKS);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
-
-  // Audio state
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -46,12 +42,10 @@ const Room = () => {
   isShuffleRef.current = isShuffle;
 
   const currentTrack = queue[currentIndex] || null;
-
-  // Broadcast refs
   const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
 
-  // Play a track immediately
-  const handlePlayTrack = useCallback((idx: number) => {
+  // Play a track from the beginning
+  const playTrack = useCallback((idx: number) => {
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -59,15 +53,16 @@ const Room = () => {
     if (!track) return;
 
     setCurrentIndex(idx);
-    
+    setCurrentTime(0); // Reset to 0:00
+    audio.currentTime = 0; // Reset audio playback position
+
     if (audio.src !== track.url) {
       audio.src = track.url;
       audio.load();
     }
-    
+
     audio.play().catch(console.error);
 
-    // Sync state with everyone
     updatePlaybackStateRef.current?.({
       currentTrackIndex: idx,
       queue: queueRef.current,
@@ -78,14 +73,14 @@ const Room = () => {
   // Handle state changes from Firebase (for members receiving host updates)
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     if (isHost) return;
-    
+
     const newIndex = state.currentTrackIndex ?? 0;
     const newQueue = state.queue || [];
-    
+
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
       setQueue(newQueue);
     }
-    
+
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -95,7 +90,7 @@ const Room = () => {
         audio.src = track.url;
         audio.load();
       }
-      
+
       if (state.isPlaying) {
         audio.play().catch(console.error);
       } else {
@@ -120,12 +115,11 @@ const Room = () => {
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
-      setIsPlaying(false);
       if (queueRef.current.length > 0) {
         const nextIdx = isShuffleRef.current
           ? Math.floor(Math.random() * queueRef.current.length)
           : (currentIndexRef.current + 1) % queueRef.current.length;
-        handlePlayTrack(nextIdx);
+        playTrack(nextIdx);
       }
     };
 
@@ -178,7 +172,7 @@ const Room = () => {
     const generatedId = isHost
       ? `host-${roomCode.toLowerCase()}`
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
-    
+
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
@@ -186,7 +180,7 @@ const Room = () => {
   const handleTogglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !audio.src) return;
-    
+
     if (!audio.paused) {
       audio.pause();
       updatePlaybackStateRef.current?.({ isPlaying: false });
@@ -199,29 +193,30 @@ const Room = () => {
   // Next track
   const handleNext = useCallback(() => {
     if (queueRef.current.length === 0) return;
-    
+
     const nextIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
-    handlePlayTrack(nextIdx);
-  }, [handlePlayTrack]);
+    playTrack(nextIdx);
+  }, [playTrack]);
 
   // Previous track
   const handlePrevious = useCallback(() => {
     if (queueRef.current.length === 0) return;
-    
+
     const prevIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
-    handlePlayTrack(prevIdx);
-  }, [handlePlayTrack]);
+    playTrack(prevIdx);
+  }, [playTrack]);
 
   // Seek the audio
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (audioRef.current) {
       audioRef.current.currentTime = parseFloat(e.target.value);
+      setCurrentTime(parseFloat(e.target.value));
       updatePlaybackStateRef.current?.({ currentTime: parseFloat(e.target.value) });
     }
   }, []);
@@ -250,7 +245,7 @@ const Room = () => {
 
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
-    
+
     updatePlaybackStateRef.current?.({
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
@@ -271,7 +266,7 @@ const Room = () => {
 
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
-    
+
     updatePlaybackStateRef.current?.({
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
@@ -293,7 +288,7 @@ const Room = () => {
 
     setQueue(newQueue);
     setCurrentIndex(newActive);
-    
+
     updatePlaybackStateRef.current?.({
       queue: newQueue,
       currentTrackIndex: newActive,
@@ -307,10 +302,10 @@ const Room = () => {
     let newActive = currentIndexRef.current;
     if (idx < currentIndexRef.current) newActive = currentIndexRef.current - 1;
     else if (idx === currentIndexRef.current) newActive = Math.min(currentIndexRef.current, newQueue.length - 1);
-    
+
     setQueue(newQueue);
     setCurrentIndex(newActive);
-    
+
     updatePlaybackStateRef.current?.({
       queue: newQueue,
       currentTrackIndex: newActive,
@@ -335,14 +330,14 @@ const Room = () => {
               <span>Synced with host</span>
             </div>
           )}
-          <RoomDrawer 
-            roomCode={roomCode} 
+          <RoomDrawer
+            roomCode={roomCode}
             userName={userName}
             queue={queue}
             currentIndex={currentIndex}
             isHost={isHost}
             onLeave={handleLeaveRoom}
-            onTrackClick={handlePlayTrack}
+            onTrackClick={playTrack}
             onReorder={handleReorder}
             onRemove={handleRemoveTrack}
             onAddSong={handleAddSong}
@@ -353,7 +348,6 @@ const Room = () => {
 
       <main className="flex-1 p-4 max-w-lg mx-auto w-full">
         {isHost ? (
-          // HOST VIEW: Full sound controls
           <>
             <div className="w-full aspect-square bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
               {currentTrack?.cover ? (
@@ -393,14 +387,14 @@ const Room = () => {
                 size="icon"
                 onClick={handleToggleShuffle}
                 className={`border border-black transition-colors ${
-                  isShuffle 
-                    ? "bg-black text-white hover:bg-neutral-800" 
+                  isShuffle
+                    ? "bg-black text-white hover:bg-neutral-800"
                     : "bg-white text-black hover:bg-gray-100"
                 }`}
               >
                 <Shuffle className="w-4 h-4" />
               </Button>
-              
+
               <Button
                 variant="ghost"
                 size="icon"
@@ -409,14 +403,14 @@ const Room = () => {
               >
                 <SkipBack className="w-5 h-5" />
               </Button>
-              
+
               <Button
                 onClick={handleTogglePlay}
                 className="w-16 h-16 border-2 border-black bg-black hover:bg-neutral-800 text-white flex items-center justify-center"
               >
                 {isPlaying ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7 ml-1" />}
               </Button>
-              
+
               <Button
                 variant="ghost"
                 size="icon"
@@ -425,14 +419,14 @@ const Room = () => {
               >
                 <SkipForward className="w-5 h-5" />
               </Button>
-              
+
               <Button
                 variant={isMuted ? "default" : "ghost"}
                 size="icon"
                 onClick={handleToggleMute}
                 className={`border border-black transition-colors ${
-                  isMuted 
-                    ? "bg-black text-white hover:bg-neutral-800" 
+                  isMuted
+                    ? "bg-black text-white hover:bg-neutral-800"
                     : "bg-white text-black hover:bg-gray-100"
                 }`}
               >
@@ -441,7 +435,6 @@ const Room = () => {
             </div>
           </>
         ) : (
-          // MEMBER VIEW: Just the synced status text
           <div className="flex flex-col items-center justify-center min-h-[60vh]">
             <div className="flex items-center gap-2 text-sm font-mono font-semibold text-gray-700 uppercase">
               <span className="w-2 h-2 bg-black"></span>
