@@ -9,9 +9,7 @@ export interface FirebaseSyncState {
   currentTime: number;
   queue: Track[];
   vetoActive?: boolean;
-  // Phase 2: The synced target time when playback should start
-  targetSyncedTime?: number;
-  lastUpdateId: string; // Unique ID for each state update to prevent loops
+  lastUpdateId: string;
   lastUpdated: number;
 }
 
@@ -30,10 +28,7 @@ class FirebaseSignaling {
   private connected: boolean = false;
   private isDestroyed: boolean = false;
   
-  // Track the last update ID we've processed to prevent loops
   private lastProcessedUpdateId: string = "";
-  
-  // Store unsubscribe functions for cleanup
   private unsubscribers: (() => void)[] = [];
 
   constructor(roomCode: string, myId: string, myName: string, isHost: boolean) {
@@ -119,7 +114,6 @@ class FirebaseSignaling {
   }
 
   private setupListeners() {
-    // Listen for room deletion
     const roomUnsub = onValue(this.roomRef, (snapshot: any) => {
       if (!snapshot.exists() && !this.isDestroyed && !this.isHost) {
         this.notifySessionEnded();
@@ -129,7 +123,6 @@ class FirebaseSignaling {
     });
     this.unsubscribers.push(() => roomUnsub());
 
-    // Listen for user list changes
     const usersUnsub = onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
       const usersData = snapshot.val();
       
@@ -152,7 +145,6 @@ class FirebaseSignaling {
     });
     this.unsubscribers.push(() => usersUnsub());
 
-    // Listen for state changes (PRIMARY sync mechanism)
     const stateUnsub = onValue(this.stateRef, (snapshot: any) => {
       const state = snapshot.val();
       if (state) {
@@ -160,7 +152,7 @@ class FirebaseSignaling {
           return;
         }
         this.lastProcessedUpdateId = state.lastUpdateId || "";
-        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex, "targetTime:", state.targetSyncedTime);
+        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex);
         this.notifyStateChange(state);
       }
     }, (error: any) => {
@@ -168,7 +160,6 @@ class FirebaseSignaling {
     });
     this.unsubscribers.push(() => stateUnsub());
 
-    // Listen for instant action messages (kick, ban, etc.)
     const messagesUnsub = onValue(ref(db, `rooms/${this.roomCode}/messages`), (snapshot: any) => {
       const messages = snapshot.val();
       if (messages) {
@@ -288,11 +279,7 @@ class FirebaseSignaling {
     this.isDestroyed = true;
     
     this.unsubscribers.forEach(unsub => {
-      try {
-        unsub();
-      } catch (e) {
-        console.warn("Error unsubscribing:", e);
-      }
+      try { unsub(); } catch (e) { console.warn("Error unsubscribing:", e); }
     });
     this.unsubscribers = [];
 

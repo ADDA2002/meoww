@@ -20,22 +20,12 @@ export function useFirebaseSync({
   myId,
   userName,
   isHost,
-  queue,
-  currentIndex,
-  isPlaying,
   onMessage,
   onStateChange,
   onSessionEnded,
 }: UseFirebaseSyncOptions) {
   const signalingRef = useRef<FirebaseSignaling | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const queueRef = useRef(queue);
-  const currentIndexRef = useRef(currentIndex);
-  const isPlayingRef = useRef(isPlaying);
-
-  queueRef.current = queue;
-  currentIndexRef.current = currentIndex;
-  isPlayingRef.current = isPlaying;
 
   useEffect(() => {
     if (!roomCode || !myId) return;

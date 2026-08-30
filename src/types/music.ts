@@ -17,20 +17,6 @@ export interface RoomUser {
 }
 
 export type SyncMessage =
-  | { type: "JOIN"; user: RoomUser }
-  | { type: "JOIN_REJECT"; reason: string; existingName: string }
-  | { type: "NAME_UPDATE"; newName: string; originalName: string }
   | { type: "USER_LIST"; users: RoomUser[] }
-  | { type: "PLAY"; trackIndex: number; seekTime: number; timestamp: number }
-  | { type: "PAUSE"; seekTime: number }
-  | { type: "SEEK"; seekTime: number; timestamp: number }
-  | { type: "UPDATE_QUEUE"; queue: Track[]; activeIndex: number }
-  | { type: "REQUEST_SYNC"; requesterId: string }
-  | { type: "CHAT"; sender: string; text: string; time: string }
-  | { type: "VETO_TOGGLE"; active: boolean; hostId: string }
   | { type: "KICK_USER"; targetId: string; targetName: string; reason?: string }
-  | { type: "BAN_USER"; targetId: string; targetName: string; reason?: string }
-  // NEW: Signal that a participant has buffered the current track
-  | { type: "READY"; userId: string; trackId: string; userName: string }
-  // NEW: Host announces a track is being scheduled (gives time to buffer)
-  | { type: "TRACK_PREPARE"; trackId: string; trackIndex: number; queue: Track[] };
+  | { type: "BAN_USER"; targetId: string; targetName: string; reason?: string };
