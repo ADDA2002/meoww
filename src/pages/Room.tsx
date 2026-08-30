@@ -43,7 +43,6 @@ const Room = () => {
   const isHostRef = useRef(isHost);
   const lastSyncStateRef = useRef<FirebaseSyncState | null>(null);
   const lastSyncTimeRef = useRef<number>(0);
-  const hasReceivedStateRef = useRef<boolean>(false);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -53,18 +52,15 @@ const Room = () => {
   const currentTrack = queue[currentIndex] || null;
 
   // Broadcast current state to Firebase
-  // Pass explicit isPlaying instead of reading from audio.paused (which lags behind React state)
   const broadcastState = useCallback((extra?: Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean }) => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    // Use explicit value if provided, otherwise read from audio element
     const playing = extra?.explicitIsPlaying !== undefined
       ? extra.explicitIsPlaying
       : !audio.paused;
 
-    // Remove the explicitIsPlaying key before spreading into update
-    const { explicitIsPlaying, ...rest } = extra || {};
+    const { explicitIsPlaying, ...rest } = (extra || {}) as Partial<FirebaseSyncState> & { explicitIsPlaying?: boolean };
 
     updatePlaybackStateRef.current?.({
       currentTrackIndex: currentIndexRef.current,
@@ -105,7 +101,6 @@ const Room = () => {
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     if (isHostRef.current) return;
 
-    hasReceivedStateRef.current = true;
     lastSyncStateRef.current = state;
     lastSyncTimeRef.current = Date.now();
 
@@ -209,15 +204,15 @@ const Room = () => {
     };
   }, []);
 
-  // Host: load track into audio element whenever currentTrack changes
-  // Member: NEVER auto-loads based on currentTrack — track is driven solely by
-  // the Firebase state handler above to avoid double audio.
+  // Host: load new track into audio element when currentTrack changes.
+  // Do NOT call audio.pause() here — playTrack() already handles loading
+  // and playing. Pausing here would stop the audio that playTrack just started.
   useEffect(() => {
     if (!isHost) return;
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
 
-    audio.pause();
+    // Only reload if the URL actually changed
     if (audio.src !== currentTrack.url) {
       audio.src = currentTrack.url;
       audio.load();
