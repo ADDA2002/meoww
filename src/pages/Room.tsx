@@ -82,22 +82,14 @@ const Room = () => {
   });
 
   // Auto-play when track changes (for host auto-advance)
-  // NOTE: Do NOT add 'play' to deps - it causes auto-play on mount!
-  const playRef = useRef(play);
-  playRef.current = play;
-
   useEffect(() => {
     if (!isHost || !currentTrack) return;
     
-    // Small delay to ensure audio element is ready
-    const timeoutId = setTimeout(() => {
-      playRef.current().catch((err) => {
-        console.warn("Auto-play after track change failed:", err);
-      });
-    }, 100);
-
-    return () => clearTimeout(timeoutId);
-  }, [currentIndex, isHost, currentTrack]);
+    // Try to play whenever currentIndex changes
+    play().catch((err) => {
+      console.warn("Auto-play after track change failed:", err);
+    });
+  }, [currentIndex, isHost, currentTrack, play]);
 
   // Handle sync messages
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
@@ -186,12 +178,12 @@ const Room = () => {
   }, [isConnected, myId, getUsers]);
 
   // Playback controls - now using refs to avoid stale closures
-  const playRef2 = useRef(play);
+  const playRef = useRef(play);
   const pauseRef = useRef(pause);
   const seekRef = useRef(seek);
   const broadcastRef = useRef(broadcast);
 
-  playRef2.current = play;
+  playRef.current = play;
   pauseRef.current = pause;
   seekRef.current = seek;
   broadcastRef.current = broadcast;
@@ -201,7 +193,7 @@ const Room = () => {
       pauseRef.current();
       broadcastRef.current({ type: "PAUSE", seekTime: getCurrentTime() });
     } else {
-      playRef2.current();
+      playRef.current();
       broadcastRef.current({
         type: "PLAY",
         trackIndex: currentIndex,
@@ -228,7 +220,7 @@ const Room = () => {
     // Play when ready
     setTimeout(() => {
       seekRef.current(0);
-      playRef2.current();
+      playRef.current();
       broadcastRef.current({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
     }, 50);
   }, [queue.length, isShuffle, currentIndex]);
@@ -250,7 +242,7 @@ const Room = () => {
     // Play when ready
     setTimeout(() => {
       seekRef.current(0);
-      playRef2.current();
+      playRef.current();
       broadcastRef.current({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
     }, 50);
   }, [queue.length, isShuffle, currentIndex]);
@@ -268,7 +260,7 @@ const Room = () => {
     // Play when ready
     setTimeout(() => {
       seekRef.current(0);
-      playRef2.current();
+      playRef.current();
       broadcastRef.current({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
     }, 50);
   }, [isHost]);
