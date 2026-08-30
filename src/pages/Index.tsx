@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
-import { formatDisplayName } from "@/lib/nameFormat";
-import { checkFirebaseRoomExists } from "@/lib/firebaseRoomCheck";
+import { formatDisplayName } from "@/utils/nameFormat";
+import { checkFirebaseRoomExists } from "@/services/firebaseRoomCheck";
 
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 

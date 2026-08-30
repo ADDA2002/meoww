@@ -32,10 +32,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Track, RoomUser, SyncMessage } from "@/types/music";
-import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
-import { formatDisplayName } from "@/lib/nameFormat";
+import { DEFAULT_TRACKS } from "@/constants/defaultTracks";
+import { formatDisplayName } from "@/utils/nameFormat";
 import RoomDrawer from "@/components/RoomDrawer";
-import FirebaseSignaling, { FirebaseSyncState } from "@/lib/firebaseSignaling";
+import FirebaseSignaling, { FirebaseSyncState } from "@/services/firebaseSignaling";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
