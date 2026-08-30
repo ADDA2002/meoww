@@ -35,6 +35,9 @@ class FirebaseSignaling {
   private roomRef: any = null;
   private connected: boolean = false;
   private isDestroyed: boolean = false;
+  
+  // Store unsubscribe functions for cleanup
+  private unsubscribers: (() => void)[] = [];
 
   constructor(roomCode: string, myId: string, myName: string, isHost: boolean) {
     this.roomCode = roomCode.toLowerCase();
@@ -84,63 +87,10 @@ class FirebaseSignaling {
           this.connected = true;
           this.notifyConnectionState(true);
 
-          this.broadcastInitialUsers();
+          // Set up listeners for users, state, and messages
+          this.setupListeners();
 
-          if (!this.isHost) {
-            onValue(this.roomRef, (snapshot: any) => {
-              if (!snapshot.exists() && !this.isDestroyed) {
-                console.log(`[FirebaseSignaling] 🔔 Room deleted (host left), notifying session ended`);
-                this.notifySessionEnded();
-              }
-            }, (error: any) => {
-              console.error(`[FirebaseSignaling] ❌ onValue room error:`, error);
-            });
-          }
-
-          onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
-            const usersData = snapshot.val();
-            console.log(`[FirebaseSignaling] 🔔 onValue users fired, data:`, usersData);
-            
-            if (!this.isHost && usersData) {
-              const hostStillPresent = Object.values(usersData).some((u: any) => u.isHost === true);
-              if (!hostStillPresent) {
-                console.log(`[FirebaseSignaling] 🔔 Host no longer present, room should end`);
-                this.notifySessionEnded();
-                return;
-              }
-            }
-            
-            if (usersData) {
-              const users: RoomUser[] = Object.values(usersData);
-              this.notifyMessage({ type: "USER_LIST", users });
-            } else {
-              this.notifyMessage({ type: "USER_LIST", users: [] });
-            }
-          }, (error: any) => {
-            console.error(`[FirebaseSignaling] ❌ onValue users error:`, error);
-          });
-
-          onValue(this.stateRef, (snapshot: any) => {
-            const state = snapshot.val();
-            console.log(`[FirebaseSignaling] 🔔 onValue state fired:`, state ? "exists" : "null");
-            if (state) {
-              this.notifyStateChange(state);
-            }
-          });
-
-          onValue(ref(db, `rooms/${this.roomCode}/messages`), (snapshot: any) => {
-            const messages = snapshot.val();
-            console.log(`[FirebaseSignaling] 🔔 onValue messages fired`);
-            if (messages) {
-              Object.values(messages).forEach((msg: any) => {
-                if (msg.senderId !== this.myId) {
-                  const { senderId, senderName, timestamp, ...syncMsg } = msg;
-                  this.notifyMessage(syncMsg as SyncMessage);
-                }
-              });
-            }
-          });
-
+          // If host, initialize room state
           if (this.isHost) {
             console.log(`[FirebaseSignaling] I am host, initializing room state`);
             set(this.stateRef, {
@@ -150,7 +100,7 @@ class FirebaseSignaling {
               isPlaying: false,
               currentTime: 0,
               queue: [],
-              vetoActive: false,
+              vetoActive: true, // Default to add-only mode
               timestamp: Date.now(),
               lastUpdated: serverTimestamp()
             });
@@ -173,6 +123,75 @@ class FirebaseSignaling {
         resolve();
       }
     });
+  }
+
+  private setupListeners() {
+    // Listen for room deletion (host left)
+    const roomUnsub = onValue(this.roomRef, (snapshot: any) => {
+      if (!snapshot.exists() && !this.isDestroyed && !this.isHost) {
+        console.log(`[FirebaseSignaling] 🔔 Room deleted (host left), notifying session ended`);
+        this.notifySessionEnded();
+      }
+    }, (error: any) => {
+      console.error(`[FirebaseSignaling] ❌ onValue room error:`, error);
+    });
+    this.unsubscribers.push(() => roomUnsub());
+
+    // Listen for user list changes
+    const usersUnsub = onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
+      const usersData = snapshot.val();
+      console.log(`[FirebaseSignaling] 🔔 onValue users fired, data:`, usersData);
+      
+      // Check if host is still present
+      if (!this.isHost && usersData) {
+        const hostStillPresent = Object.values(usersData).some((u: any) => u.isHost === true && u.id !== this.myId);
+        if (!hostStillPresent) {
+          console.log(`[FirebaseSignaling] 🔔 Host no longer present, room should end`);
+          this.notifySessionEnded();
+          return;
+        }
+      }
+      
+      if (usersData) {
+        const users: RoomUser[] = Object.values(usersData);
+        this.notifyMessage({ type: "USER_LIST", users });
+      } else {
+        this.notifyMessage({ type: "USER_LIST", users: [] });
+      }
+    }, (error: any) => {
+      console.error(`[FirebaseSignaling] ❌ onValue users error:`, error);
+    });
+    this.unsubscribers.push(() => usersUnsub());
+
+    // Listen for state changes (playback sync)
+    const stateUnsub = onValue(this.stateRef, (snapshot: any) => {
+      const state = snapshot.val();
+      console.log(`[FirebaseSignaling] 🔔 onValue state fired:`, state ? "exists" : "null");
+      if (state) {
+        this.notifyStateChange(state);
+      }
+    }, (error: any) => {
+      console.error(`[FirebaseSignaling] ❌ onValue state error:`, error);
+    });
+    this.unsubscribers.push(() => stateUnsub());
+
+    // Listen for messages (chat, moderation, etc.)
+    const messagesUnsub = onValue(ref(db, `rooms/${this.roomCode}/messages`), (snapshot: any) => {
+      const messages = snapshot.val();
+      console.log(`[FirebaseSignaling] 🔔 onValue messages fired`);
+      if (messages) {
+        Object.values(messages).forEach((msg: any) => {
+          // Filter out own messages to prevent echo
+          if (msg.senderId !== this.myId) {
+            const { senderId, senderName, timestamp, ...syncMsg } = msg;
+            this.notifyMessage(syncMsg as SyncMessage);
+          }
+        });
+      }
+    }, (error: any) => {
+      console.error(`[FirebaseSignaling] ❌ onValue messages error:`, error);
+    });
+    this.unsubscribers.push(() => messagesUnsub());
   }
 
   private broadcastInitialUsers() {
@@ -217,6 +236,7 @@ class FirebaseSignaling {
       timestamp: serverTimestamp()
     });
 
+    // Clean up message after 30 seconds
     setTimeout(() => {
       if (msgRef) remove(msgRef).catch(() => {});
     }, 30000);
@@ -225,10 +245,11 @@ class FirebaseSignaling {
   updateState(updates: Partial<FirebaseSyncState>) {
     if (!db || !this.stateRef) return;
 
+    // Use set to overwrite entire state (simpler for sync)
     set(this.stateRef, {
       ...updates,
       roomCode: this.roomCode,
-      hostId: this.myId,
+      hostId: this.isHost ? this.myId : updates.hostId,
       timestamp: Date.now(),
       lastUpdated: serverTimestamp()
     });
@@ -271,16 +292,31 @@ class FirebaseSignaling {
 
   disconnect() {
     if (this.isDestroyed) return;
+    this.isDestroyed = true;
+    
+    // Clean up all Firebase listeners
+    this.unsubscribers.forEach(unsub => {
+      try {
+        unsub();
+      } catch (e) {
+        console.warn("Error unsubscribing:", e);
+      }
+    });
+    this.unsubscribers = [];
+
     if (!db) return;
 
+    // Remove own user presence
     if (this.userRef) {
       remove(this.userRef).catch(() => {});
     }
 
-    if (this.isHost) {
+    // If host, delete entire room
+    if (this.isHost && this.roomRef) {
       remove(this.roomRef).catch(() => {});
       this.notifySessionEnded();
     } else {
+      // Check if host is still present before ending session
       get(ref(db, `rooms/${this.roomCode}/users`)).then((snapshot: any) => {
         const usersData = snapshot.val();
         if (usersData) {

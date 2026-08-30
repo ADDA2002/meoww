@@ -62,6 +62,7 @@ export function useFirebaseSync({
   const broadcast = useCallback((msg: SyncMessage) => {
     signalingRef.current?.send(msg);
     
+    // Also update Firebase state for persistence and other clients to sync
     if (isHost) {
       const stateUpdates: Partial<FirebaseSyncState> = {};
       
@@ -102,11 +103,16 @@ export function useFirebaseSync({
     return signalingRef.current?.getUsers() || [];
   }, []);
 
+  const getState = useCallback(async () => {
+    return signalingRef.current?.getState() || null;
+  }, []);
+
   return {
     isConnected,
     broadcast,
     kickUser,
     banUser,
     getUsers,
+    getState,
   };
 }
