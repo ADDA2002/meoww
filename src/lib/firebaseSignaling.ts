@@ -41,10 +41,13 @@ class FirebaseSignaling {
 
   connect(): Promise<void> {
     return new Promise((resolve) => {
+      console.log(`[FirebaseSignaling] ${this.myId} connecting to room ${this.roomCode} (host=${this.isHost})`);
+
       if (!db) {
         console.warn("⚠️ Firebase not available, running in offline mode");
         this.connected = true;
         this.notifyConnectionState(true);
+        this.broadcastInitialUsers();
         resolve();
         return;
       }
@@ -61,30 +64,39 @@ class FirebaseSignaling {
           lastSeen: serverTimestamp()
         };
 
+        console.log(`[FirebaseSignaling] Writing my presence to ${this.userRef.toString()}`);
         set(this.userRef, userData).then(() => {
+          console.log(`[FirebaseSignaling] ✅ My presence written`);
           onDisconnect(this.userRef).remove();
 
           this.connected = true;
           this.notifyConnectionState(true);
-          console.log("✅ Firebase connected");
 
-          // ✅ FIX: After writing my presence, MANUALLY query the users list
-          // because onValue won't fire for my own write!
+          // Manually query users after writing (onValue won't fire for own write)
+          console.log(`[FirebaseSignaling] Broadcasting initial users...`);
           this.broadcastInitialUsers();
 
-          // Subscribe to ongoing user list changes (fires when OTHERS join/leave)
+          // Subscribe to user list changes
+          console.log(`[FirebaseSignaling] Setting up onValue for users...`);
           onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
             const usersData = snapshot.val();
+            console.log(`[FirebaseSignaling] 🔔 onValue users fired, data:`, usersData);
             if (usersData) {
               const users: RoomUser[] = Object.values(usersData);
-              console.log("👥 Users changed:", users.map(u => u.name));
+              console.log(`[FirebaseSignaling] → Notifying USER_LIST:`, users.map(u => u.name));
               this.notifyMessage({ type: "USER_LIST", users });
+            } else {
+              console.log(`[FirebaseSignaling] → Notifying USER_LIST: []`);
+              this.notifyMessage({ type: "USER_LIST", users: [] });
             }
+          }, (error: any) => {
+            console.error(`[FirebaseSignaling] ❌ onValue users error:`, error);
           });
 
           // Subscribe to room state changes
           onValue(this.stateRef, (snapshot: any) => {
             const state = snapshot.val();
+            console.log(`[FirebaseSignaling] 🔔 onValue state fired:`, state ? "exists" : "null");
             if (state) {
               this.notifyStateChange(state);
             }
@@ -93,10 +105,12 @@ class FirebaseSignaling {
           // Subscribe to sync messages from others
           onValue(ref(db, `rooms/${this.roomCode}/messages`), (snapshot: any) => {
             const messages = snapshot.val();
+            console.log(`[FirebaseSignaling] 🔔 onValue messages fired`);
             if (messages) {
               Object.values(messages).forEach((msg: any) => {
                 if (msg.senderId !== this.myId) {
                   const { senderId, senderName, timestamp, ...syncMsg } = msg;
+                  console.log(`[FirebaseSignaling] → Notifying sync message:`, syncMsg);
                   this.notifyMessage(syncMsg as SyncMessage);
                 }
               });
@@ -105,6 +119,7 @@ class FirebaseSignaling {
 
           // If host, initialize room state
           if (this.isHost) {
+            console.log(`[FirebaseSignaling] I am host, initializing room state`);
             set(this.stateRef, {
               roomCode: this.roomCode,
               hostId: this.myId,
@@ -122,7 +137,6 @@ class FirebaseSignaling {
           console.error("❌ Firebase write failed:", err);
           this.connected = true;
           this.notifyConnectionState(true);
-          // Still broadcast initial users even on error
           this.broadcastInitialUsers();
           resolve();
         });
@@ -137,11 +151,11 @@ class FirebaseSignaling {
     });
   }
 
-  // ✅ NEW: Manually query users and broadcast the initial list
-  // This fixes the onValue-not-firing-for-your-own-write bug
   private broadcastInitialUsers() {
+    console.log(`[FirebaseSignaling] broadcastInitialUsers() called`);
+    
     if (!db) {
-      // Offline mode: just notify self
+      console.log(`[FirebaseSignaling] → Offline mode, notifying self only`);
       this.notifyMessage({ type: "USER_LIST", users: [{
         id: this.myId,
         name: this.myName,
@@ -151,18 +165,22 @@ class FirebaseSignaling {
       return;
     }
 
+    console.log(`[FirebaseSignaling] → Querying Firebase for users at rooms/${this.roomCode}/users`);
     get(ref(db, `rooms/${this.roomCode}/users`)).then((snapshot: any) => {
       const usersData = snapshot.val();
+      console.log(`[FirebaseSignaling] → get() returned:`, usersData);
+      
       const users: RoomUser[] = usersData ? Object.values(usersData) : [{
         id: this.myId,
         name: this.myName,
         isHost: this.isHost,
         joinedAt: Date.now()
       }];
-      console.log("👥 Initial users broadcast:", users.map(u => u.name));
+      
+      console.log(`[FirebaseSignaling] → Notifying USER_LIST:`, users.map(u => `${u.name}(${u.id})`));
       this.notifyMessage({ type: "USER_LIST", users });
-    }).catch(() => {
-      // Fallback: at least notify self
+    }).catch((err) => {
+      console.error(`[FirebaseSignaling] → get() failed:`, err);
       this.notifyMessage({ type: "USER_LIST", users: [{
         id: this.myId,
         name: this.myName,
@@ -200,6 +218,7 @@ class FirebaseSignaling {
   }
 
   onMessage(callback: (msg: SyncMessage) => void) {
+    console.log(`[FirebaseSignaling] onMessage registered, listener count: ${this.listeners.length + 1}`);
     this.listeners.push(callback);
   }
 
@@ -212,7 +231,11 @@ class FirebaseSignaling {
   }
 
   private notifyMessage(msg: SyncMessage) {
-    this.listeners.forEach(cb => cb(msg));
+    console.log(`[FirebaseSignaling] notifyMessage called, listeners: ${this.listeners.length}, msg.type: ${msg.type}`);
+    this.listeners.forEach((cb, i) => {
+      console.log(`[FirebaseSignaling] → Calling listener ${i}`);
+      cb(msg);
+    });
   }
 
   private notifyStateChange(state: FirebaseSyncState) {

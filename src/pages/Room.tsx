@@ -123,25 +123,24 @@ const Room = () => {
     const signaling = new FirebaseSignaling(roomCode, generatedId, userName, isHost);
     signalingRef.current = signaling;
 
+    console.log(`[Room] Registering onMessage handler, myId=${generatedId}`);
+
     // Handle incoming sync messages
     signaling.onMessage((msg: SyncMessage) => {
+      console.log(`[Room] 🔔 handleIncomingMessage fired, type=${msg.type}, msg=`, msg);
       handleIncomingMessage(msg);
     });
 
     // Handle state changes (from host)
     signaling.onStateChange((state: FirebaseSyncState) => {
+      console.log(`[Room] 🔔 onStateChange fired, state=`, state);
       if (!isHostRef.current) {
-        // Update queue from host
         if (state.queue && state.queue.length > 0) {
           setQueue(state.queue);
         }
-        
-        // Sync playback state
         if (state.currentTrackIndex !== undefined) {
           setCurrentIndex(state.currentTrackIndex);
         }
-        
-        // Sync play/pause
         if (state.isPlaying !== undefined && state.isPlaying !== isPlayingRef.current) {
           if (state.isPlaying) {
             audioRef.current?.play().catch(() => {});
@@ -151,8 +150,6 @@ const Room = () => {
             setIsPlaying(false);
           }
         }
-        
-        // Sync current time (with latency compensation)
         if (state.currentTime !== undefined && state.timestamp) {
           const latency = (Date.now() - state.timestamp) / 1000;
           const targetTime = state.currentTime + latency;
@@ -165,22 +162,21 @@ const Room = () => {
 
     // Handle connection state
     signaling.onConnectionChange((connected: boolean) => {
+      console.log(`[Room] 🔔 onConnectionChange: ${connected}`);
       setIsFirebaseConnected(connected);
       setIsConnected(connected);
     });
 
-    // Connect - now always resolves (even if Firebase fails, goes to offline mode)
     signaling.connect().then(() => {
-      console.log("🎉 Room connected!");
+      console.log("[Room] ✅ Signaling connected!");
       
-      // Get initial users
       signaling.getUsers().then((userList) => {
+        console.log(`[Room] getUsers() returned:`, userList);
         if (userList.length > 0) {
           setUsers(userList);
         }
       });
 
-      // Get initial state if exists
       if (!isHost) {
         signaling.getState().then((state) => {
           if (state) {
@@ -194,9 +190,6 @@ const Room = () => {
             }
           }
         });
-      } else {
-        // Initialize queue for host
-        setQueue(DEFAULT_TRACKS);
       }
     });
 
@@ -207,8 +200,10 @@ const Room = () => {
 
   // Handle incoming sync messages
   const handleIncomingMessage = (msg: SyncMessage) => {
+    console.log(`[Room] Processing message type: ${msg.type}`);
     switch (msg.type) {
       case "USER_LIST": {
+        console.log(`[Room] → USER_LIST: setting users to`, msg.users.map(u => `${u.name}(${u.id})`));
         setUsers(msg.users);
         break;
       }
@@ -217,19 +212,16 @@ const Room = () => {
           const audio = audioRef.current;
           if (!audio) return;
           
-          // Switch track if needed
           if (currentIndexRef.current !== msg.trackIndex) {
             setCurrentIndex(msg.trackIndex);
           }
           
-          // Sync time
           const latency = (Date.now() - msg.timestamp) / 1000;
           const targetTime = msg.seekTime + latency;
           if (Math.abs(audio.currentTime - targetTime) > 0.3) {
             audio.currentTime = targetTime;
           }
           
-          // Play
           audio.play().then(() => setIsPlaying(true)).catch(() => {});
         }
         break;
@@ -277,9 +269,9 @@ const Room = () => {
 
   // Broadcast sync message
   const broadcast = (msg: SyncMessage) => {
+    console.log(`[Room] Broadcasting: ${msg.type}`);
     signalingRef.current?.send(msg);
     
-    // Also update Firebase state if host
     if (isHost) {
       const stateUpdates: Partial<FirebaseSyncState> = {};
       
@@ -499,7 +491,6 @@ const Room = () => {
           <span className="font-extrabold tracking-wider text-lg uppercase">Meoww</span>
         </div>
         <div className="flex items-center gap-3">
-          {/* Connection status */}
           <div className={`flex items-center gap-1.5 text-xs font-mono px-2 py-1 ${isConnected ? 'text-green-600' : 'text-red-500'}`}>
             {isConnected ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
             <span>{isConnected ? 'CONNECTED' : 'OFFLINE'}</span>
