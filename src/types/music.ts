@@ -22,8 +22,10 @@ export type SyncMessage =
   | { type: "NAME_UPDATE"; newName: string; originalName: string }
   | { type: "USER_LIST"; users: RoomUser[] }
   | { type: "PLAY"; trackIndex: number; seekTime: number; timestamp: number }
+  | { type: "SCHEDULED_PLAY"; trackIndex: number; seekTime: number; fireTime: number }
   | { type: "PAUSE"; seekTime: number }
-  | { type: "SEEK"; seekTime: number; timestamp: number }
+  | { type: "SEEK"; seekTime: number }
+  | { type: "SYNC_DRIFT"; seekTime: number; timestamp: number }
   | { type: "UPDATE_QUEUE"; queue: Track[]; activeIndex: number }
   | { type: "REQUEST_SYNC"; requesterId: string }
   | { type: "HOST_TRANSFER"; newHostId: string }

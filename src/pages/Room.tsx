@@ -34,6 +34,10 @@ import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 import RoomDrawer from "@/components/RoomDrawer";
 
+// Sync buffer time - schedule playback this many ms in the future
+// Must be larger than max expected ping
+const SYNC_BUFFER_MS = 600;
+
 const Room = () => {
   const { code } = useParams<{ code: string }>();
   const [searchParams] = useSearchParams();
@@ -69,19 +73,21 @@ const Room = () => {
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   
-  // Refs that track state for use in closures
+  // Refs for state access in closures
   const usersRef = useRef<RoomUser[]>([]);
   const queueRef = useRef<Track[]>(queue);
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
-  const isPlayingRef = useRef<boolean>(isPlaying);
 
-  // Keep refs in sync with state
+  // Scheduled playback timers
+  const scheduledPlayRef = useRef<number | null>(null);
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Keep refs synced with state
   useEffect(() => { usersRef.current = users; }, [users]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
-  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
   const currentTrack = queue[currentIndex] || null;
 
@@ -101,13 +107,13 @@ const Room = () => {
     const measurePing = () => {
       const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
       const testPeer = new Peer(`${myId}-ping-${Date.now()}`, { debug: 0 });
+      const startTime = Date.now();
 
       const timeout = setTimeout(() => {
         try { testPeer.destroy(); } catch (e) { /* noop */ }
       }, 3000);
 
       testPeer.on("open", () => {
-        const startTime = Date.now();
         const conn = testPeer.connect(hostPeerId, { reliable: true });
 
         conn.on("open", () => {
@@ -137,6 +143,18 @@ const Room = () => {
       clearInterval(interval);
     };
   }, [isHost, roomCode, myId]);
+
+  // Cleanup scheduled timers
+  useEffect(() => {
+    return () => {
+      if (scheduledPlayRef.current) {
+        clearTimeout(scheduledPlayRef.current);
+      }
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Initialize PeerJS
   useEffect(() => {
@@ -222,56 +240,67 @@ const Room = () => {
     return baseName + " " + Date.now();
   };
 
-  // ============= AUDIO PLAYBACK (CORE SYNC LOGIC) =============
-  
+  // ============= SCHEDULED PLAYBACK (CORE SYNC) =============
+
   /**
-   * Plays audio at a specific target time with proper sync.
-   * This is the main function used by both host actions and listener sync.
-   * 
-   * @param targetTime - The exact time in seconds to seek to
-   * @param trackIndex - Which track to play (optional, for track changes)
+   * Schedules audio to play at a specific future time on ALL devices
+   * This ensures everyone starts at the exact same millisecond
    */
-  const playAudioAt = useCallback((targetTime: number, trackIndex?: number) => {
+  const schedulePlayAt = useCallback((targetTime: number, fireTime: number, trackIndex?: number) => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    // If we're changing to a different track
+    // If track changed, update state (this updates audio.src)
     if (trackIndex !== undefined && trackIndex !== currentIndexRef.current) {
-      // Update state will trigger re-render which updates audio.src
       setCurrentIndex(trackIndex);
     }
 
-    // Wait for audio to be ready, then seek and play
-    const playWhenReady = () => {
-      // Remove this listener
-      audio.removeEventListener('canplay', playWhenReady);
-      
-      // Calculate how far we need to seek
-      const currentPos = audio.currentTime;
-      const drift = targetTime - currentPos;
-      
-      // Only seek if drift is significant (> 50ms)
-      if (Math.abs(drift) > 0.05) {
-        audio.currentTime = targetTime;
-      }
-      
-      // Play and update state
+    // Calculate delay until fire time
+    const delay = fireTime - Date.now();
+    
+    if (delay <= 0) {
+      // Fire time has passed, play immediately at target time
+      audio.currentTime = targetTime;
       audio.play().then(() => {
         setIsPlaying(true);
-      }).catch((e) => {
-        console.log("Play blocked:", e);
-      });
-    };
-
-    // Check if audio is already ready to play
-    if (audio.readyState >= 3) { // HAVE_FUTURE_DATA
-      playWhenReady();
-    } else {
-      // Wait for canplay event
-      audio.addEventListener('canplay', playWhenReady);
-      audio.load();
+      }).catch(console.error);
+      return;
     }
-  }, []); // No dependencies - this function uses refs
+
+    // Clear any existing scheduled play
+    if (scheduledPlayRef.current) {
+      clearTimeout(scheduledPlayRef.current);
+    }
+
+    // Schedule the play
+    scheduledPlayRef.current = window.setTimeout(() => {
+      scheduledPlayRef.current = null;
+      
+      // Set position and play
+      audio.currentTime = targetTime;
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch(console.error);
+    }, delay);
+  }, []);
+
+  /**
+   * Host: Schedule playback for everyone including self
+   */
+  const hostSchedulePlay = (trackIndex: number, seekTime: number = 0) => {
+    const fireTime = Date.now() + SYNC_BUFFER_MS;
+    
+    // Host plays locally using scheduled playback
+    schedulePlayAt(seekTime, fireTime, trackIndex);
+    
+    // Broadcast to all listeners
+    broadcast({
+      type: "SCHEDULED_PLAY",
+      trackIndex,
+      seekTime,
+      fireTime,
+    });
+  };
 
   // ============= PLAYBACK CONTROLS (HOST ACTIONS) =============
 
@@ -279,32 +308,24 @@ const Room = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const now = Date.now();
-
-    if (isPlayingRef.current) {
+    if (isPlaying) {
       // PAUSE
       audio.pause();
       setIsPlaying(false);
+      
+      // Clear any scheduled play
+      if (scheduledPlayRef.current) {
+        clearTimeout(scheduledPlayRef.current);
+        scheduledPlayRef.current = null;
+      }
       
       broadcast({
         type: "PAUSE",
         seekTime: audio.currentTime,
       });
     } else {
-      // PLAY - play at current position immediately
-      audio.play().then(() => {
-        setIsPlaying(true);
-        
-        broadcast({
-          type: "PLAY",
-          trackIndex: currentIndexRef.current,
-          seekTime: audio.currentTime,
-          timestamp: Date.now(),
-        });
-      }).catch((err) => {
-        console.error("Play failed:", err);
-        toast.error("Couldn't play this track.");
-      });
+      // PLAY - use scheduled playback for sync
+      hostSchedulePlay(currentIndex, audio.currentTime);
     }
   };
 
@@ -318,35 +339,8 @@ const Room = () => {
       nextIdx = (currentIndex + 1) % queue.length;
     }
 
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // Play new track from beginning, broadcast to listeners
-    const playWhenReady = () => {
-      audio.removeEventListener('canplay', playWhenReady);
-      audio.currentTime = 0;
-      
-      audio.play().then(() => {
-        setIsPlaying(true);
-        
-        broadcast({
-          type: "PLAY",
-          trackIndex: nextIdx,
-          seekTime: 0,
-          timestamp: Date.now(),
-        });
-      }).catch(console.error);
-    };
-
-    setCurrentIndex(nextIdx);
-
-    // Wait for new audio source to be ready
-    if (audio.readyState >= 3) {
-      playWhenReady();
-    } else {
-      audio.addEventListener('canplay', playWhenReady);
-      audio.load();
-    }
+    // Play from beginning
+    hostSchedulePlay(nextIdx, 0);
   };
 
   const handlePrevious = () => {
@@ -359,33 +353,8 @@ const Room = () => {
       prevIdx = (currentIndex - 1 + queue.length) % queue.length;
     }
 
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const playWhenReady = () => {
-      audio.removeEventListener('canplay', playWhenReady);
-      audio.currentTime = 0;
-      
-      audio.play().then(() => {
-        setIsPlaying(true);
-        
-        broadcast({
-          type: "PLAY",
-          trackIndex: prevIdx,
-          seekTime: 0,
-          timestamp: Date.now(),
-        });
-      }).catch(console.error);
-    };
-
-    setCurrentIndex(prevIdx);
-
-    if (audio.readyState >= 3) {
-      playWhenReady();
-    } else {
-      audio.addEventListener('canplay', playWhenReady);
-      audio.load();
-    }
+    // Play from beginning
+    hostSchedulePlay(prevIdx, 0);
   };
 
   const handleToggleShuffle = () => {
@@ -407,71 +376,72 @@ const Room = () => {
     broadcast({
       type: "SEEK",
       seekTime: targetTime,
-      timestamp: Date.now(),
     });
   };
 
   // ============= SYNC HANDLERS (LISTENER RECEIVES) =============
 
-  const handleSyncPlay = (msg: { trackIndex: number; seekTime: number; timestamp: number }) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // Calculate exact time accounting for network latency
-    // This is the key to millisecond sync:
-    // - msg.seekTime is where the audio WAS on host's machine
-    // - msg.timestamp is when host sent this message
-    // - We calculate how much time passed since then and add to seekTime
-    const elapsedMs = Date.now() - msg.timestamp;
-    const targetTime = msg.seekTime + (elapsedMs / 1000);
-
-    // If track changed, update state (this updates audio.src)
-    if (msg.trackIndex !== currentIndexRef.current) {
-      setCurrentIndex(msg.trackIndex);
-    }
-
-    // Wait for audio to be ready, then seek to exact time and play
-    const playWhenReady = () => {
-      audio.removeEventListener('canplay', playWhenReady);
-      
-      // Seek to exact calculated time
-      audio.currentTime = targetTime;
-      
-      // Play
-      audio.play().then(() => {
-        setIsPlaying(true);
-      }).catch((e) => {
-        console.log("Auto-play blocked:", e);
-      });
-    };
-
-    if (audio.readyState >= 3) {
-      playWhenReady();
-    } else {
-      audio.addEventListener('canplay', playWhenReady);
-      audio.load();
-    }
+  const handleScheduledPlay = (msg: { trackIndex: number; seekTime: number; fireTime: number }) => {
+    // Use scheduled playback - everyone plays at the exact same moment
+    schedulePlayAt(msg.seekTime, msg.fireTime, msg.trackIndex);
   };
 
   const handleSyncPause = (msg: { seekTime: number }) => {
     const audio = audioRef.current;
     if (!audio) return;
 
+    // Clear any scheduled play
+    if (scheduledPlayRef.current) {
+      clearTimeout(scheduledPlayRef.current);
+      scheduledPlayRef.current = null;
+    }
+
     audio.pause();
     audio.currentTime = msg.seekTime;
     setIsPlaying(false);
   };
 
-  const handleSyncSeek = (msg: { seekTime: number; timestamp: number }) => {
+  const handleSyncSeek = (msg: { seekTime: number }) => {
     const audio = audioRef.current;
     if (!audio) return;
-
-    // Apply same latency compensation for seeks
-    const elapsedMs = Date.now() - msg.timestamp;
-    const targetTime = msg.seekTime + (elapsedMs / 1000);
     
-    audio.currentTime = targetTime;
-    setCurrentTime(targetTime);
+    audio.currentTime = msg.seekTime;
+    setCurrentTime(msg.seekTime);
+  };
+
+  // Periodic sync to correct drift (host only sends, listeners apply)
+  const startPeriodicSync = useCallback(() => {
+    if (syncIntervalRef.current) return;
+
+    syncIntervalRef.current = setInterval(() => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused) return;
+
+      // Broadcast current position every 2 seconds
+      broadcast({
+        type: "SYNC_DRIFT",
+        seekTime: audio.currentTime,
+        timestamp: Date.now(),
+      });
+    }, 2000);
+  }, []);
+
+  const handleSyncDrift = (msg: { seekTime: number; timestamp: number }) => {
+    const audio = audioRef.current;
+    if (!audio || audio.paused) return;
+
+    // Calculate where we SHOULD be based on host's position and elapsed time
+    const elapsedMs = Date.now() - msg.timestamp;
+    const expectedPosition = msg.seekTime + (elapsedMs / 1000);
+    const currentPosition = audio.currentTime;
+    const drift = expectedPosition - currentPosition;
+
+    // If drift is significant (> 100ms), correct it
+    if (Math.abs(drift) > 0.1) {
+      console.log(`Drift correction: ${drift.toFixed(3)}s`);
+      audio.currentTime = expectedPosition;
+      setCurrentTime(expectedPosition);
+    }
   };
 
   // ============= CONNECTION HANDLING =============
@@ -489,9 +459,6 @@ const Room = () => {
           user: updatedUser,
         });
 
-        const audio = audioRef.current;
-        const currentSeek = audio ? audio.currentTime : 0;
-
         conn.send({
           type: "USER_LIST",
           users: [...usersRef.current, updatedUser],
@@ -503,14 +470,26 @@ const Room = () => {
           activeIndex: currentIndexRef.current,
         });
 
-        if (audio && !audio.paused) {
-          conn.send({
-            type: "PLAY",
-            trackIndex: currentIndexRef.current,
-            seekTime: currentSeek,
-            timestamp: Date.now(),
-          });
+        // Send current playback state
+        const audio = audioRef.current;
+        if (audio) {
+          if (!audio.paused) {
+            conn.send({
+              type: "SCHEDULED_PLAY",
+              trackIndex: currentIndexRef.current,
+              seekTime: audio.currentTime,
+              fireTime: Date.now() + SYNC_BUFFER_MS,
+            });
+          } else {
+            conn.send({
+              type: "PAUSE",
+              seekTime: audio.currentTime,
+            });
+          }
         }
+
+        // Start periodic sync when a listener joins
+        startPeriodicSync();
 
         if (uniqueName !== me.name) {
           setTimeout(() => {
@@ -581,8 +560,17 @@ const Room = () => {
         break;
       }
 
+      case "SCHEDULED_PLAY": {
+        handleScheduledPlay(msg);
+        break;
+      }
+
       case "PLAY": {
-        handleSyncPlay(msg);
+        // Legacy support - treat as scheduled play with immediate fire
+        handleScheduledPlay({
+          ...msg,
+          fireTime: Date.now() + 100,
+        });
         break;
       }
 
@@ -593,6 +581,11 @@ const Room = () => {
 
       case "SEEK": {
         handleSyncSeek(msg);
+        break;
+      }
+
+      case "SYNC_DRIFT": {
+        handleSyncDrift(msg);
         break;
       }
 
@@ -1052,31 +1045,7 @@ const Room = () => {
                     <div
                       onClick={() => {
                         if (isHost) {
-                          const audio = audioRef.current;
-                          if (!audio) return;
-
-                          const playWhenReady = () => {
-                            audio.removeEventListener('canplay', playWhenReady);
-                            audio.currentTime = 0;
-                            audio.play().then(() => {
-                              setIsPlaying(true);
-                              broadcast({
-                                type: "PLAY",
-                                trackIndex: idx,
-                                seekTime: 0,
-                                timestamp: Date.now(),
-                              });
-                            }).catch(console.error);
-                          };
-
-                          setCurrentIndex(idx);
-
-                          if (audio.readyState >= 3) {
-                            playWhenReady();
-                          } else {
-                            audio.addEventListener('canplay', playWhenReady);
-                            audio.load();
-                          }
+                          hostSchedulePlay(idx, 0);
                         }
                       }}
                       className="min-w-0 flex-1 cursor-pointer"
