@@ -6,6 +6,8 @@ export const generateRoomCode = (length: number = 6): string => {
   ).join("");
 };
 
+import type { Track } from "@/types/music";
+
 export const DEFAULT_TRACKS: Track[] = [
   {
     id: "track-1",
@@ -40,5 +42,3 @@ export const DEFAULT_TRACKS: Track[] = [
     addedBy: "System",
   }
 ];
-
-import type { Track } from "@/types/music";

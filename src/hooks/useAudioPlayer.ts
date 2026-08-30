@@ -5,21 +5,28 @@ interface UseAudioPlayerOptions {
   queue: Track[];
   currentIndex: number;
   isHost: boolean;
-  onPlayStateChange?: (isPlaying: boolean) => void;
-  onTimeUpdate?: (time: number) => void;
-  onDurationChange?: (duration: number) => void;
-  onTrackEnd?: () => void;
+}
+
+interface UseAudioPlayerReturn {
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  isMuted: boolean;
+  currentTrack: Track | null;
+  audioRef: React.RefObject<HTMLAudioElement | null>;
+  togglePlay: () => void;
+  seek: (time: number) => void;
+  toggleMute: () => void;
+  setCurrentTime: (time: number) => void;
+  setDuration: (dur: number) => void;
+  setIsPlaying: (playing: boolean) => void;
 }
 
 export function useAudioPlayer({
   queue,
   currentIndex,
   isHost,
-  onPlayStateChange,
-  onTimeUpdate,
-  onDurationChange,
-  onTrackEnd,
-}: UseAudioPlayerOptions) {
+}: UseAudioPlayerOptions): UseAudioPlayerReturn {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -28,6 +35,8 @@ export function useAudioPlayer({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isPlayingRef = useRef(false);
   const currentIndexRef = useRef(currentIndex);
+  const queueRef = useRef(queue);
+  const isHostRef = useRef(isHost);
 
   const currentTrack = queue[currentIndex] ?? null;
 
@@ -40,6 +49,14 @@ export function useAudioPlayer({
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+
+  useEffect(() => {
+    isHostRef.current = isHost;
+  }, [isHost]);
+
   // Handle mute
   useEffect(() => {
     if (audioRef.current) {
@@ -47,56 +64,44 @@ export function useAudioPlayer({
     }
   }, [isMuted]);
 
-  // Play a specific track
-  const playTrack = useCallback((trackIndex: number, seekTime: number = 0) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const targetUrl = queue[trackIndex]?.url;
-    if (!targetUrl) return;
-
-    const startPlayback = () => {
-      audio.currentTime = seekTime;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        isPlayingRef.current = true;
-        onPlayStateChange?.(true);
-      }).catch(console.error);
-    };
-
-    if (audio.src !== targetUrl) {
-      audio.src = targetUrl;
-      audio.load();
-      audio.addEventListener("canplay", () => {
-        audio.removeEventListener("canplay", arguments.callee);
-        startPlayback();
-      }, { once: true });
-    } else {
-      startPlayback();
-    }
-  }, [queue, onPlayStateChange]);
-
   // Toggle play/pause
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (isPlaying) {
+    if (isPlayingRef.current) {
       audio.pause();
       setIsPlaying(false);
       isPlayingRef.current = false;
-      onPlayStateChange?.(false);
     } else {
-      playTrack(currentIndexRef.current, audio.currentTime);
+      const targetUrl = queueRef.current[currentIndexRef.current]?.url;
+      if (!targetUrl) return;
+
+      const startPlayback = () => {
+        audio.play().then(() => {
+          setIsPlaying(true);
+          isPlayingRef.current = true;
+        }).catch(console.error);
+      };
+
+      if (audio.src !== targetUrl) {
+        audio.src = targetUrl;
+        audio.load();
+        audio.addEventListener("canplay", () => {
+          audio.removeEventListener("canplay", arguments.callee);
+          startPlayback();
+        }, { once: true });
+      } else {
+        startPlayback();
+      }
     }
-  }, [isPlaying, playTrack, onPlayStateChange]);
+  }, []);
 
   // Seek to time
   const seek = useCallback((time: number) => {
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = time;
-      setCurrentTime(time);
     }
   }, []);
 
@@ -105,87 +110,18 @@ export function useAudioPlayer({
     setIsMuted(prev => !prev);
   }, []);
 
-  // Playback from remote sync (listener only)
-  const syncPlay = useCallback((trackIndex: number, seekTime: number, _timestamp: number) => {
-    if (isHost) return; // Only listeners respond to sync
-
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    setCurrentIndex(trackIndex);
-    currentIndexRef.current = trackIndex;
-
-    const targetUrl = queue[trackIndex]?.url;
-    if (!targetUrl) return;
-
-    const startPlayback = () => {
-      audio.currentTime = seekTime;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        isPlayingRef.current = true;
-      }).catch(console.error);
-    };
-
-    if (audio.src !== targetUrl) {
-      audio.src = targetUrl;
-      audio.load();
-      audio.addEventListener("canplay", () => {
-        audio.removeEventListener("canplay", arguments.callee);
-        startPlayback();
-      }, { once: true });
-    } else {
-      startPlayback();
-    }
-  }, [isHost, queue]);
-
-  // Sync pause from remote (listener only)
-  const syncPause = useCallback((seekTime: number) => {
-    if (isHost) return;
-
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = seekTime;
-      audio.pause();
-      setIsPlaying(false);
-      isPlayingRef.current = false;
-    }
-  }, [isHost]);
-
-  // Sync seek from remote (listener only)
-  const syncSeek = useCallback((seekTime: number) => {
-    if (isHost) return;
-
-    const audio = audioRef.current;
-    if (audio) {
-      audio.currentTime = seekTime;
-    }
-  }, [isHost]);
-
   return {
-    // State
     isPlaying,
     currentTime,
     duration,
     isMuted,
     currentTrack,
-    // Ref for direct audio access
     audioRef,
-    // Actions
-    playTrack,
     togglePlay,
     seek,
     toggleMute,
-    syncPlay,
-    syncPause,
-    syncSeek,
-    // Internal state setter for sync
-    setCurrentIndex: (idx: number) => {
-      currentIndexRef.current = idx;
-    },
+    setCurrentTime,
+    setDuration,
+    setIsPlaying,
   };
-}
-
-// Helper to set current index from outside
-function setCurrentIndex(idx: number) {
-  // This will be overridden by the hook return
 }
