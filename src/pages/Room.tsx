@@ -313,7 +313,7 @@ const Room = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white text-black flex flex-col justify-between">
+    <div className="min-h-screen bg-white text-black flex flex-col">
       <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
         <div className="flex items-center gap-2">
           <img src="/logo.gif" alt="Meoww" className="w-8 h-8 object-contain" />
@@ -340,7 +340,7 @@ const Room = () => {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center p-6 max-w-lg mx-auto w-full">
+      <main className="flex-1 flex flex-col items-center justify-center p-4 max-w-lg mx-auto w-full">
         <div className="w-full">
           <div className="flex items-center justify-center mb-4 pb-2 border-b border-gray-200 text-xs font-mono">
             <div className="flex items-center gap-2">
