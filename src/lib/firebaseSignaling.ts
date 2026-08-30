@@ -9,9 +9,8 @@ export interface FirebaseSyncState {
   currentTime: number;
   queue: Track[];
   vetoActive?: boolean;
-  lastUpdateId: string;
+  lastUpdateId: string; // Unique ID for each state update to prevent loops
   lastUpdated: number;
-  timestamp: number;
 }
 
 class FirebaseSignaling {
@@ -19,6 +18,8 @@ class FirebaseSignaling {
   private myId: string;
   private myName: string;
   private isHost: boolean;
+  private listeners: ((msg: SyncMessage) => void)[] = [];
+  private stateListener: ((state: FirebaseSyncState | null) => void)[] = [];
   private connectionStateListener: ((connected: boolean) => void)[] = [];
   private sessionEndedListener: (() => void)[] = [];
   private userRef: any = null;
@@ -48,6 +49,7 @@ class FirebaseSignaling {
         console.warn("⚠️ Firebase not available, running in offline mode");
         this.connected = true;
         this.notifyConnectionState(true);
+        this.broadcastInitialUsers();
         resolve();
         return;
       }
@@ -91,8 +93,7 @@ class FirebaseSignaling {
               queue: [],
               vetoActive: true,
               lastUpdateId: `init-${Date.now()}`,
-              lastUpdated: Date.now(),
-              timestamp: Date.now()
+              lastUpdated: Date.now()
             });
           }
 
@@ -101,6 +102,7 @@ class FirebaseSignaling {
           console.error("❌ Firebase write failed:", err);
           this.connected = true;
           this.notifyConnectionState(true);
+          this.broadcastInitialUsers();
           resolve();
         });
 
@@ -108,6 +110,7 @@ class FirebaseSignaling {
         console.error("❌ Firebase setup error:", err);
         this.connected = true;
         this.notifyConnectionState(true);
+        this.broadcastInitialUsers();
         resolve();
       }
     });
@@ -135,6 +138,13 @@ class FirebaseSignaling {
           return;
         }
       }
+      
+      if (usersData) {
+        const users: RoomUser[] = Object.values(usersData);
+        this.notifyMessage({ type: "USER_LIST", users });
+      } else {
+        this.notifyMessage({ type: "USER_LIST", users: [] });
+      }
     }, (error: any) => {
       console.error(`[FirebaseSignaling] ❌ onValue users error:`, error);
     });
@@ -149,7 +159,8 @@ class FirebaseSignaling {
           return;
         }
         this.lastProcessedUpdateId = state.lastUpdateId || "";
-        console.log(`[FirebaseSignaling] 🔔 State update: isPlaying=${state.isPlaying}, trackIdx=${state.currentTrackIndex}`);
+        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex);
+        this.notifyStateChange(state);
       }
     }, (error: any) => {
       console.error(`[FirebaseSignaling] ❌ onValue state error:`, error);
@@ -164,8 +175,7 @@ class FirebaseSignaling {
           // Only process messages from other users
           if (msg.senderId !== this.myId) {
             const { senderId, senderName, timestamp, ...syncMsg } = msg;
-            // Dispatch custom event for sync messages
-            window.dispatchEvent(new CustomEvent('firebase-sync-message', { detail: syncMsg }));
+            this.notifyMessage(syncMsg as SyncMessage);
           }
         });
       }
@@ -175,6 +185,39 @@ class FirebaseSignaling {
     this.unsubscribers.push(() => messagesUnsub());
   }
 
+  private broadcastInitialUsers() {
+    if (!db) {
+      this.notifyMessage({ type: "USER_LIST", users: [{
+        id: this.myId,
+        name: this.myName,
+        isHost: this.isHost,
+        joinedAt: Date.now()
+      }]});
+      return;
+    }
+
+    get(ref(db, `rooms/${this.roomCode}/users`)).then((snapshot: any) => {
+      const usersData = snapshot.val();
+      
+      const users: RoomUser[] = usersData ? Object.values(usersData) : [{
+        id: this.myId,
+        name: this.myName,
+        isHost: this.isHost,
+        joinedAt: Date.now()
+      }];
+      
+      this.notifyMessage({ type: "USER_LIST", users });
+    }).catch((err) => {
+      this.notifyMessage({ type: "USER_LIST", users: [{
+        id: this.myId,
+        name: this.myName,
+        isHost: this.isHost,
+        joinedAt: Date.now()
+      }]});
+    });
+  }
+
+  // Send instant action message (veto toggle, kick, ban)
   send(msg: SyncMessage) {
     if (!db) return;
 
@@ -191,6 +234,7 @@ class FirebaseSignaling {
     }, 30000);
   }
 
+  // Update room state (PRIMARY sync mechanism for playback)
   updateState(updates: Partial<FirebaseSyncState>) {
     if (!db || !this.stateRef) return;
 
@@ -201,11 +245,18 @@ class FirebaseSignaling {
       roomCode: this.roomCode,
       hostId: this.isHost ? this.myId : undefined,
       lastUpdateId: updateId,
-      lastUpdated: Date.now(),
-      timestamp: Date.now()
+      lastUpdated: Date.now()
     });
     
     this.lastProcessedUpdateId = updateId;
+  }
+
+  onMessage(callback: (msg: SyncMessage) => void) {
+    this.listeners.push(callback);
+  }
+
+  onStateChange(callback: (state: FirebaseSyncState | null) => void) {
+    this.stateListener.push(callback);
   }
 
   onConnectionChange(callback: (connected: boolean) => void) {
@@ -214,6 +265,14 @@ class FirebaseSignaling {
 
   onSessionEnded(callback: () => void) {
     this.sessionEndedListener.push(callback);
+  }
+
+  private notifyMessage(msg: SyncMessage) {
+    this.listeners.forEach((cb) => cb(msg));
+  }
+
+  private notifyStateChange(state: FirebaseSyncState | null) {
+    this.stateListener.forEach(cb => cb(state));
   }
 
   private notifyConnectionState(connected: boolean) {
