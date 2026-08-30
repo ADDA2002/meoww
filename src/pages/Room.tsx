@@ -105,9 +105,8 @@ const Room = () => {
         setCurrentIndex(nextIdx);
         const nextTrack = queueRef.current[nextIdx];
         if (nextTrack && syncedClock.isReady()) {
-          const targetTime = syncedClock.now() + 5000;
+          const targetTime = syncedClock.now() + 500; // OPTIMIZED: reduced from 2000ms to 500ms
           syncScheduler.scheduleTrack(nextTrack, targetTime, `track-${nextIdx}`);
-          syncScheduler.startCountdown();
         }
       }
     };
@@ -152,7 +151,7 @@ const Room = () => {
     console.log(`[Room] Starting clock calibration...`);
     isClockCalibratedRef.current = true;
     
-    syncedClock.calibrate(5).then(() => {
+    syncedClock.calibrate(3).then(() => { // OPTIMIZED: 3 pings instead of 5
       console.log(`[Room] ✅ Clock calibrated, sync ready`);
     });
   }, [myId, roomCode]);
@@ -193,7 +192,7 @@ const Room = () => {
     if (newTargetSyncedTime && newIndex !== undefined) {
       const trackToSchedule = newQueue[newIndex];
       if (trackToSchedule) {
-        console.log(`[Room] 📅 MEMBER: Received scheduled track: "${trackToSchedule.title}" at synced time ${newTargetSyncedTime}`);
+        console.log(`[Room] 📅 MEMBER: Receiving track "${trackToSchedule.title}" at synced time ${newTargetSyncedTime}`);
         console.log(`[Room] 📅 MEMBER: Current synced time: ${syncedClock.now()}, Clock ready: ${syncedClock.isReady()}`);
         
         // Clear any existing scheduled tracks first
@@ -201,30 +200,24 @@ const Room = () => {
         
         // Schedule the track
         syncScheduler.scheduleTrack(trackToSchedule, newTargetSyncedTime, `track-${newIndex}`);
-        syncScheduler.startCountdown();
         
         setCurrentIndex(newIndex);
         
         // If the target time has already passed, trigger immediately
         if (syncedClock.isReady() && syncedClock.now() >= newTargetSyncedTime) {
           console.log(`[Room] 📅 MEMBER: Target time already passed, triggering immediately`);
-          // Force trigger by checking the scheduler
           const audioEl = syncScheduler.getAudioElement();
-          const scheduledTrack = syncScheduler.getAllTracks()[0];
-          if (scheduledTrack && scheduledTrack.blobUrl) {
-            audioEl.src = scheduledTrack.blobUrl;
-            audioEl.currentTime = 0;
-            audioEl.play().catch(console.error);
-          }
+          audioEl.src = trackToSchedule.url;
+          audioEl.currentTime = 0;
+          audioEl.play().catch(console.error);
         }
       }
     } else if (newIndex !== currentIndexRef.current) {
-      // Track change without scheduled time - just update the index
       console.log(`[Room] MEMBER: Track change (no schedule): ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
     }
 
-    // Handle play/pause commands (for immediate response when not using scheduled sync)
+    // Handle play/pause commands
     if (newIsPlaying && !newTargetSyncedTime) {
       const audioEl = syncScheduler.getAudioElement();
       if (audioEl.paused) {
@@ -315,7 +308,7 @@ const Room = () => {
     };
   }, []);
 
-  // Load initial state when connected (for members joining mid-session)
+  // Load initial state when connected
   useEffect(() => {
     if (!isConnected || !myId || isHost || isInitializedRef.current) return;
     isInitializedRef.current = true;
@@ -349,7 +342,6 @@ const Room = () => {
               state.targetSyncedTime,
               `track-${state.currentTrackIndex}`
             );
-            syncScheduler.startCountdown();
           }
         }
         
@@ -366,10 +358,9 @@ const Room = () => {
   }, [isConnected, myId, isHost, getState, getUsers]);
 
   /**
-   * Host schedules a track with a synced target time.
-   * This is the main entry point for the host to start a track.
+   * OPTIMIZED: Reduced delay from 2000ms to 500ms (0.5 second buffer for pre-fetch)
    */
-  const scheduleTrackForPlayback = useCallback((trackIdx: number, delayMs: number = 5000) => {
+  const scheduleTrackForPlayback = useCallback((trackIdx: number, delayMs: number = 500) => {
     if (!isHost) return;
     if (!syncedClock.isReady()) {
       toast.error("Clock not calibrated yet. Please wait...");
@@ -379,21 +370,19 @@ const Room = () => {
     const track = queueRef.current[trackIdx];
     if (!track) return;
 
-    // Calculate the target synced time (now + delay)
     const targetSyncedTime = syncedClock.now() + delayMs;
     
     console.log(`[Room] 📅 HOST scheduling "${track.title}" for synced time ${targetSyncedTime} (in ${delayMs}ms)`);
     
-    // Schedule locally (host's own playback)
+    // Schedule locally
     syncScheduler.scheduleTrack(track, targetSyncedTime, `track-${trackIdx}`);
-    syncScheduler.startCountdown();
     
     // Broadcast to all members
     updatePlaybackStateRef.current?.({
       currentTrackIndex: trackIdx,
       queue: queueRef.current,
       targetSyncedTime,
-      isPlaying: false, // Will be triggered by scheduler
+      isPlaying: false,
     });
 
     setCurrentIndex(trackIdx);
@@ -408,15 +397,13 @@ const Room = () => {
     const audioEl = syncScheduler.getAudioElement();
     
     if (!audioEl.paused) {
-      // Currently playing -> pause
       audioEl.pause();
       updatePlaybackStateRef.current?.({
         isPlaying: false,
         targetSyncedTime: undefined,
       });
     } else {
-      // Not playing -> schedule current track
-      scheduleTrackForPlayback(currentIndexRef.current, 5000);
+      scheduleTrackForPlayback(currentIndexRef.current, 500); // OPTIMIZED: 500ms delay
     }
   }, [isHost, scheduleTrackForPlayback]);
 
@@ -431,8 +418,7 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
-    // Schedule next track with synced clock (5s buffer for pre-fetch)
-    scheduleTrackForPlayback(nextIdx, 5000);
+    scheduleTrackForPlayback(nextIdx, 500); // OPTIMIZED: 500ms delay
   }, [isHost, isShuffle, scheduleTrackForPlayback]);
 
   const handlePrevious = useCallback(() => {
@@ -446,7 +432,7 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
-    scheduleTrackForPlayback(prevIdx, 5000);
+    scheduleTrackForPlayback(prevIdx, 500); // OPTIMIZED: 500ms delay
   }, [isHost, isShuffle, scheduleTrackForPlayback]);
 
   const handleTrackClick = useCallback((idx: number) => {
@@ -454,7 +440,7 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-    scheduleTrackForPlayback(idx, 5000);
+    scheduleTrackForPlayback(idx, 500); // OPTIMIZED: 500ms delay
   }, [isHost, scheduleTrackForPlayback]);
 
   const handleSeekFromBar = useCallback((time: number) => {
@@ -462,7 +448,6 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-    // Seek the scheduler's audio element
     const schedulerAudio = syncScheduler.getAudioElement();
     schedulerAudio.currentTime = time;
     updatePlaybackStateRef.current?.({
@@ -470,7 +455,7 @@ const Room = () => {
     });
   }, [isHost]);
 
-  // Queue management - Add is open to all even during veto
+  // Queue management
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
       id: `track-${Date.now()}`,
@@ -511,7 +496,7 @@ const Room = () => {
     toast.success(`Loaded: ${file.name}`);
   }, [userName, isHost]);
 
-  // Reorder & Remove - locked for non-host members during veto
+  // Reorder & Remove
   const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
     if (!isHost) {
       if (controlsLocked) {
@@ -717,7 +702,7 @@ const Room = () => {
                   {isHost ? "YOU ARE HOST" : "SYNCED WITH HOST"}
                 </span>
               </div>
-              <span className="text-gray-500">PRECISION SYNC</span>
+              <span className="text-gray-500">LOW-LATENCY SYNC</span>
             </div>
 
             <TrackInfo track={currentTrack} />
@@ -773,7 +758,7 @@ const Room = () => {
       </main>
 
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
-        Meoww - Precision-Synced Audio (Server-Synced Clock)
+        Meoww - Low-Latency Precision Sync
       </footer>
     </div>
   );
