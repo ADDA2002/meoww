@@ -60,7 +60,6 @@ const Room = () => {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [ping, setPing] = useState<number>(0);
-  const [audioLoaded, setAudioLoaded] = useState<boolean>(false);
 
   // Add Song Dialog State
   const [addSongOpen, setAddSongOpen] = useState(false);
@@ -76,17 +75,12 @@ const Room = () => {
   const queueRef = useRef<Track[]>(queue);
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
-  const isPlayingRef = useRef<boolean>(isPlaying);
-  const audioLoadedRef = useRef<boolean>(false);
-  const pendingSeekRef = useRef<number | null>(null);
 
   // Keep refs updated for event callbacks
   usersRef.current = users;
   queueRef.current = queue;
   isHostRef.current = isHost;
   currentIndexRef.current = currentIndex;
-  isPlayingRef.current = isPlaying;
-  audioLoadedRef.current = audioLoaded;
 
   const currentTrack = queue[currentIndex] || null;
 
@@ -96,12 +90,6 @@ const Room = () => {
       audioRef.current.muted = isMuted;
     }
   }, [isMuted]);
-
-  // Reset audio loaded state when track changes
-  useEffect(() => {
-    setAudioLoaded(false);
-    audioLoadedRef.current = false;
-  }, [currentTrack?.url]);
 
   // Ping measurement (listeners only)
   useEffect(() => {
@@ -113,6 +101,7 @@ const Room = () => {
       
       const timeout = setTimeout(() => {
         try { testPeer.destroy(); } catch (e) { /* noop */ }
+        // Use last known ping or show dash
         setPing((prev) => prev || 0);
       }, 2000);
 
@@ -140,7 +129,10 @@ const Room = () => {
       });
     };
 
+    // Initial ping after connection
     const initialTimer = setTimeout(measurePing, 1000);
+    
+    // Re-ping every 5 seconds
     const interval = setInterval(measurePing, 5000);
 
     return () => {
@@ -160,13 +152,17 @@ const Room = () => {
 
   // Generate a unique name by adding a number suffix with a space if there's a conflict
   const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
+    // Always store the comparison name in formatted form (first capital, rest lowercase)
     const normalizedBase = baseName.trim().toLowerCase();
     const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
     
+    // Check if base name already exists
     if (!existingNames.includes(normalizedBase)) {
       return baseName;
     }
     
+    // Try adding numbers at the end with a space until we find a unique one
+    // e.g., "Alex" becomes "Alex 1", "Alex 2", etc.
     for (let i = 1; i <= 999; i++) {
       const candidate = baseName + " " + i;
       if (!existingNames.includes(candidate.toLowerCase())) {
@@ -174,6 +170,7 @@ const Room = () => {
       }
     }
     
+    // Fallback: add timestamp suffix
     return baseName + " " + Date.now();
   };
 
@@ -181,14 +178,17 @@ const Room = () => {
   useEffect(() => {
     if (!roomCode) return;
 
+    // A deterministic peer ID for the host so others can join, and random for listeners
     const generatedId = isHost 
       ? `meoww-room-${roomCode.toLowerCase()}` 
       : `meoww-user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
     setMyId(generatedId);
 
+    // Generate unique name if needed (only for non-hosts joining)
     const finalName = isHost ? userName : generateUniqueName(userName, []);
     
+    // Update the displayed name if it changed
     if (finalName !== userName) {
       setUserName(finalName);
     }
@@ -211,6 +211,7 @@ const Room = () => {
       setIsConnected(true);
       
       if (!isHost) {
+        // Connect to host peer
         const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
         const conn = peer.connect(hostPeerId, { reliable: true });
         setupConnection(conn, currentUser);
@@ -239,18 +240,24 @@ const Room = () => {
   // Connection data handler
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
     conn.on("open", () => {
+      // If this connection is from a listener trying to join the host
       if (isHostRef.current) {
+        // Check for duplicate name (case-insensitive) and generate unique name
         const uniqueName = generateUniqueName(me.name, usersRef.current);
         const updatedUser = { ...me, name: uniqueName };
 
+        // If name was changed, notify the user
         if (uniqueName !== me.name) {
+          // Send the updated user info with the new name
           connectionsRef.current.set(conn.peer, conn);
           
+          // Send JOIN with the unique name
           conn.send({
             type: "JOIN",
             user: updatedUser,
           });
           
+          // Send notification to the user about their new name
           conn.send({
             type: "NAME_UPDATE",
             newName: uniqueName,
@@ -262,11 +269,13 @@ const Room = () => {
 
         connectionsRef.current.set(conn.peer, conn);
 
+        // If listener connecting to host, announce self
         conn.send({
           type: "JOIN",
           user: me,
         });
 
+        // If host, send current state to the new listener
         if (isHostRef.current) {
           const audio = audioRef.current;
           const currentSeek = audio ? audio.currentTime : 0;
@@ -294,6 +303,7 @@ const Room = () => {
       } else {
         connectionsRef.current.set(conn.peer, conn);
         
+        // If listener connecting to host, announce self
         conn.send({
           type: "JOIN",
           user: me,
@@ -315,12 +325,14 @@ const Room = () => {
   const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
     switch (msg.type) {
       case "NAME_UPDATE": {
+        // Update our displayed name if the host assigned us a new one
         setUserName(msg.newName);
         toast.info(`Your name was updated to "${msg.newName}" because "${msg.originalName}" was taken.`);
         break;
       }
 
       case "JOIN": {
+        // If we're the host, do a final duplicate check before adding
         if (isHostRef.current) {
           const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
           const updatedUser = { ...msg.user, name: uniqueName };
@@ -330,6 +342,7 @@ const Room = () => {
           setUsers(updatedUsers);
           
           if (uniqueName !== msg.user.name) {
+            // Notify the user about the name change
             const conn = connectionsRef.current.get(senderPeerId);
             if (conn && conn.open) {
               conn.send({
@@ -375,51 +388,21 @@ const Room = () => {
         const audio = audioRef.current;
         if (!audio) return;
 
+        // Millisecond accurate sync compensation
         const latencySec = (Date.now() - msg.timestamp) / 1000;
         const targetTime = msg.seekTime + latencySec;
 
-        // If track is changing, wait for the new audio to load
         if (currentIndexRef.current !== msg.trackIndex) {
           setCurrentIndex(msg.trackIndex);
-          // Store the seek target so it applies once the new track loads
-          pendingSeekRef.current = targetTime;
-        } else if (Math.abs(audio.currentTime - targetTime) > 0.15) {
+        }
+
+        if (Math.abs(audio.currentTime - targetTime) > 0.15) {
           audio.currentTime = targetTime;
         }
 
-        const attemptPlay = () => {
-          audio.play().then(() => {
-            setIsPlaying(true);
-            isPlayingRef.current = true;
-            // Apply pending seek if there was one
-            if (pendingSeekRef.current !== null) {
-              audio.currentTime = pendingSeekRef.current;
-              pendingSeekRef.current = null;
-            }
-          }).catch((e) => {
-            console.log("Play error:", e);
-            // Retry once after a short delay
-            setTimeout(() => {
-              audio.play().then(() => {
-                setIsPlaying(true);
-                isPlayingRef.current = true;
-              }).catch(console.error);
-            }, 200);
-          });
-        };
-
-        if (audio.readyState >= 3) {
-          attemptPlay();
-        } else {
-          // Wait for the new audio to be ready
-          const onCanPlay = () => {
-            audio.removeEventListener("canplay", onCanPlay);
-            attemptPlay();
-          };
-          audio.addEventListener("canplay", onCanPlay);
-          // Force load
-          audio.load();
-        }
+        audio.play().then(() => setIsPlaying(true)).catch((e) => {
+          console.log("Auto-play blocked, user click needed:", e);
+        });
         break;
       }
 
@@ -429,7 +412,6 @@ const Room = () => {
           audio.currentTime = msg.seekTime;
           audio.pause();
           setIsPlaying(false);
-          isPlayingRef.current = false;
         }
         break;
       }
@@ -473,6 +455,7 @@ const Room = () => {
 
     const wasHost = usersRef.current.find((u) => u.id === disconnectedId)?.isHost;
     if (wasHost && remainingUsers.length > 0) {
+      // Pick the next earliest joined participant
       const sorted = [...remainingUsers].sort((a, b) => a.joinedAt - b.joinedAt);
       const nextHost = sorted[0];
 
@@ -487,55 +470,6 @@ const Room = () => {
     }
   };
 
-  // Core play function - ensures audio is actually playing
-  const playAudio = (trackIndex: number, seekTime: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const attemptPlay = () => {
-      audio.currentTime = seekTime;
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-          broadcast({
-            type: "PLAY",
-            trackIndex: trackIndex,
-            seekTime: seekTime,
-            timestamp: Date.now(),
-          });
-        }).catch((err) => {
-          console.log("Play attempt failed, retrying:", err);
-          // Retry after a short delay
-          setTimeout(() => {
-            audio.play().then(() => {
-              setIsPlaying(true);
-              isPlayingRef.current = true;
-              broadcast({
-                type: "PLAY",
-                trackIndex: trackIndex,
-                seekTime: seekTime,
-                timestamp: Date.now(),
-              });
-            }).catch(console.error);
-          }, 300);
-        });
-      }
-    };
-
-    if (audio.readyState >= 2) {
-      attemptPlay();
-    } else {
-      const onLoaded = () => {
-        audio.removeEventListener("loadeddata", onLoaded);
-        attemptPlay();
-      };
-      audio.addEventListener("loadeddata", onLoaded);
-      audio.load();
-    }
-  };
-
   // Playback audio element controls
   const handleTogglePlay = () => {
     const audio = audioRef.current;
@@ -544,13 +478,20 @@ const Room = () => {
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
-      isPlayingRef.current = false;
       broadcast({
         type: "PAUSE",
         seekTime: audio.currentTime,
       });
     } else {
-      playAudio(currentIndex, audio.currentTime);
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: currentIndex,
+          seekTime: audio.currentTime,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
     }
   };
 
@@ -558,48 +499,50 @@ const Room = () => {
     if (queue.length === 0) return;
     let nextIdx = 0;
     if (isShuffle) {
-      // Pick a random index different from current
-      if (queue.length > 1) {
-        do {
-          nextIdx = Math.floor(Math.random() * queue.length);
-        } while (nextIdx === currentIndex);
-      } else {
-        nextIdx = 0;
-      }
+      nextIdx = Math.floor(Math.random() * queue.length);
     } else {
       nextIdx = (currentIndex + 1) % queue.length;
     }
     setCurrentIndex(nextIdx);
-    // Play the new track from the beginning
-    playAudio(nextIdx, 0);
+
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: nextIdx,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
+    }
   };
 
   const handlePrevious = () => {
     if (queue.length === 0) return;
     let prevIdx = 0;
     if (isShuffle) {
-      // Pick a random index different from current
-      if (queue.length > 1) {
-        do {
-          prevIdx = Math.floor(Math.random() * queue.length);
-        } while (prevIdx === currentIndex);
-      } else {
-        prevIdx = 0;
-      }
+      prevIdx = Math.floor(Math.random() * queue.length);
     } else {
       prevIdx = (currentIndex - 1 + queue.length) % queue.length;
     }
     setCurrentIndex(prevIdx);
-    // Play the previous track from the beginning
-    playAudio(prevIdx, 0);
-  };
 
-  const handleShuffleToggle = () => {
-    setIsShuffle((prev) => !prev);
-  };
-
-  const handleMuteToggle = () => {
-    setIsMuted((prev) => !prev);
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = 0;
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({
+          type: "PLAY",
+          trackIndex: prevIdx,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
+    }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -646,7 +589,7 @@ const Room = () => {
     toast.success("Track added to queue!");
   };
 
-  // Upload local MP3 file
+  // Upload local MP3 file (for user's test.mp3 or local music)
   const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -683,6 +626,7 @@ const Room = () => {
     newQueue[idx] = newQueue[targetIdx];
     newQueue[targetIdx] = temp;
 
+    // update active index if needed
     let newActive = currentIndex;
     if (currentIndex === idx) {
       newActive = targetIdx;
@@ -830,11 +774,11 @@ const Room = () => {
             <div className="flex items-center justify-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={handleShuffleToggle}
+                onClick={() => setIsShuffle(!isShuffle)}
                 className={`p-2 border border-black transition-colors ${
                   isShuffle ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
-                title={isShuffle ? "Shuffle On" : "Shuffle Off"}
+                title="Toggle Shuffle"
               >
                 <Shuffle className="w-4 h-4" />
               </button>
@@ -868,7 +812,7 @@ const Room = () => {
 
               <button
                 type="button"
-                onClick={handleMuteToggle}
+                onClick={() => setIsMuted(!isMuted)}
                 className={`p-2 border border-black transition-colors ${
                   isMuted ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
                 }`}
@@ -1037,7 +981,12 @@ const Room = () => {
                       onClick={() => {
                         if (isHost) {
                           setCurrentIndex(idx);
-                          playAudio(idx, 0);
+                          broadcast({
+                            type: "PLAY",
+                            trackIndex: idx,
+                            seekTime: 0,
+                            timestamp: Date.now(),
+                          });
                         }
                       }}
                       className="min-w-0 flex-1 cursor-pointer"
@@ -1097,7 +1046,6 @@ const Room = () => {
       <audio
         ref={audioRef}
         src={currentTrack?.url}
-        preload="auto"
         onTimeUpdate={() => {
           if (audioRef.current) {
             setCurrentTime(audioRef.current.currentTime);
@@ -1107,18 +1055,6 @@ const Room = () => {
           if (audioRef.current) {
             setDuration(audioRef.current.duration);
           }
-        }}
-        onCanPlay={() => {
-          setAudioLoaded(true);
-          audioLoadedRef.current = true;
-        }}
-        onPlay={() => {
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-        }}
-        onPause={() => {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
         }}
         onEnded={handleNext}
       />
