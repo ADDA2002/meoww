@@ -105,7 +105,7 @@ const Room = () => {
         setCurrentIndex(nextIdx);
         const nextTrack = queueRef.current[nextIdx];
         if (nextTrack && syncedClock.isReady()) {
-          const targetTime = syncedClock.now() + 500; // OPTIMIZED: reduced from 2000ms to 500ms
+          const targetTime = syncedClock.now() + 2000;
           syncScheduler.scheduleTrack(nextTrack, targetTime, `track-${nextIdx}`);
         }
       }
@@ -151,7 +151,7 @@ const Room = () => {
     console.log(`[Room] Starting clock calibration...`);
     isClockCalibratedRef.current = true;
     
-    syncedClock.calibrate(3).then(() => { // OPTIMIZED: 3 pings instead of 5
+    syncedClock.calibrate(5).then(() => {
       console.log(`[Room] ✅ Clock calibrated, sync ready`);
     });
   }, [myId, roomCode]);
@@ -358,9 +358,10 @@ const Room = () => {
   }, [isConnected, myId, isHost, getState, getUsers]);
 
   /**
-   * OPTIMIZED: Reduced delay from 2000ms to 500ms (0.5 second buffer for pre-fetch)
+   * Back to working 2000ms delay - this is the pre-fetch time, not extra delay
+   * The audio is fully buffered as a Blob during this window, so playback is instant
    */
-  const scheduleTrackForPlayback = useCallback((trackIdx: number, delayMs: number = 500) => {
+  const scheduleTrackForPlayback = useCallback((trackIdx: number, delayMs: number = 2000) => {
     if (!isHost) return;
     if (!syncedClock.isReady()) {
       toast.error("Clock not calibrated yet. Please wait...");
@@ -403,7 +404,7 @@ const Room = () => {
         targetSyncedTime: undefined,
       });
     } else {
-      scheduleTrackForPlayback(currentIndexRef.current, 500); // OPTIMIZED: 500ms delay
+      scheduleTrackForPlayback(currentIndexRef.current, 2000);
     }
   }, [isHost, scheduleTrackForPlayback]);
 
@@ -418,7 +419,7 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
-    scheduleTrackForPlayback(nextIdx, 500); // OPTIMIZED: 500ms delay
+    scheduleTrackForPlayback(nextIdx, 2000);
   }, [isHost, isShuffle, scheduleTrackForPlayback]);
 
   const handlePrevious = useCallback(() => {
@@ -432,7 +433,7 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
-    scheduleTrackForPlayback(prevIdx, 500); // OPTIMIZED: 500ms delay
+    scheduleTrackForPlayback(prevIdx, 2000);
   }, [isHost, isShuffle, scheduleTrackForPlayback]);
 
   const handleTrackClick = useCallback((idx: number) => {
@@ -440,7 +441,7 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-    scheduleTrackForPlayback(idx, 500); // OPTIMIZED: 500ms delay
+    scheduleTrackForPlayback(idx, 2000);
   }, [isHost, scheduleTrackForPlayback]);
 
   const handleSeekFromBar = useCallback((time: number) => {
@@ -702,7 +703,7 @@ const Room = () => {
                   {isHost ? "YOU ARE HOST" : "SYNCED WITH HOST"}
                 </span>
               </div>
-              <span className="text-gray-500">LOW-LATENCY SYNC</span>
+              <span className="text-gray-500">PRECISION SYNC</span>
             </div>
 
             <TrackInfo track={currentTrack} />
@@ -758,7 +759,7 @@ const Room = () => {
       </main>
 
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
-        Meoww - Low-Latency Precision Sync
+        Meoww - Precision-Synced Audio (Server-Synced Clock)
       </footer>
     </div>
   );
