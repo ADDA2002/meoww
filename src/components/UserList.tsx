@@ -1,13 +1,15 @@
 import { Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { RoomUser } from "@/types/music";
 
 interface UserListProps {
   users: RoomUser[];
   myId: string;
   isHost: boolean;
+  onTransferHost: (userId: string) => void;
 }
 
-export function UserList({ users, myId, isHost }: UserListProps) {
+export function UserList({ users, myId, isHost, onTransferHost }: UserListProps) {
   return (
     <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
       <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
@@ -30,6 +32,14 @@ export function UserList({ users, myId, isHost }: UserListProps) {
             <div className="flex items-center gap-2">
               {user.isHost ? (
                 <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">HOST</span>
+              ) : isHost ? (
+                <Button
+                  onClick={() => onTransferHost(user.id)}
+                  size="sm"
+                  className="bg-black hover:bg-neutral-800 text-white font-mono text-[10px] font-bold px-1.5 py-0.5 h-auto"
+                >
+                  MAKE HOST
+                </Button>
               ) : (
                 <span className="text-gray-400 text-[10px]">Listener</span>
               )}
