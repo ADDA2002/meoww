@@ -352,7 +352,10 @@ const Room = () => {
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
-      // Don't auto-play on previous - user must press play
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
+      }).catch(() => {});
     }
   };
 
@@ -373,7 +376,10 @@ const Room = () => {
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
-      // Don't auto-play when clicking track - user must press play
+      audio.play().then(() => {
+        setIsPlaying(true);
+        broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
+      }).catch(() => {});
     }
   };
 
