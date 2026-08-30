@@ -38,8 +38,8 @@ const Room = () => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
 
-  // Veto (host's "Let others change what's playing" toggle)
-  const [vetoActive, setVetoActive] = useState<boolean>(false);
+  // Veto (host's "Let others change what's playing" toggle) - OFF by default
+  const [vetoActive, setVetoActive] = useState<boolean>(true);
 
   // Session state
   const [sessionEnded, setSessionEnded] = useState<boolean>(false);
