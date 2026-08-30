@@ -42,6 +42,7 @@ const Room = () => {
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
+  const isInitialMount = useRef(true);
 
   isHostRef.current = isHost;
   currentIndexRef.current = currentIndex;
@@ -81,11 +82,17 @@ const Room = () => {
     onTrackEnded: handleTrackEnded,
   });
 
-  // Auto-play when track changes (for host auto-advance)
+  // Auto-play when track changes (but NOT on initial mount)
   useEffect(() => {
     if (!isHost || !currentTrack) return;
-    
-    // Try to play whenever currentIndex changes
+
+    // Don't auto-play on initial mount - user must press play
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    // Try to play whenever currentIndex changes (skip, previous, auto-advance)
     play().catch((err) => {
       console.warn("Auto-play after track change failed:", err);
     });
@@ -162,7 +169,7 @@ const Room = () => {
     const generatedId = isHost
       ? `host-${roomCode.toLowerCase()}`
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
-    
+
     setMyId(generatedId);
   }, [roomCode]);
 
@@ -205,18 +212,18 @@ const Room = () => {
 
   const handleNext = useCallback(() => {
     if (queue.length === 0) return;
-    
+
     const nextIdx = isShuffle
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex + 1) % queue.length;
 
     // Update index first (this triggers audio element to load new track)
     setCurrentIndex(nextIdx);
-    
+
     // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
-    
+
     // Play when ready
     setTimeout(() => {
       seekRef.current(0);
@@ -227,18 +234,18 @@ const Room = () => {
 
   const handlePrevious = useCallback(() => {
     if (queue.length === 0) return;
-    
+
     const prevIdx = isShuffle
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex - 1 + queue.length) % queue.length;
 
     // Update index first
     setCurrentIndex(prevIdx);
-    
+
     // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
-    
+
     // Play when ready
     setTimeout(() => {
       seekRef.current(0);
@@ -252,11 +259,11 @@ const Room = () => {
 
     // Update index first
     setCurrentIndex(idx);
-    
+
     // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
-    
+
     // Play when ready
     setTimeout(() => {
       seekRef.current(0);
@@ -324,7 +331,7 @@ const Room = () => {
     let newActive = currentIndex;
     if (idx < currentIndex) newActive = currentIndex - 1;
     else if (idx === currentIndex) newActive = Math.min(currentIndex, newQueue.length - 1);
-    
+
     setQueue(newQueue);
     setCurrentIndex(newActive);
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
