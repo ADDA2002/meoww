@@ -102,6 +102,11 @@ const Room = () => {
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
     }
+    // Always pause when track changes - user must press play
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setIsPlaying(false);
   }, [currentIndex]);
 
   // Sync audio time for syncing
@@ -149,22 +154,8 @@ const Room = () => {
         if (state.currentTrackIndex !== undefined) {
           setCurrentIndex(state.currentTrackIndex);
         }
-        if (state.isPlaying !== undefined && state.isPlaying !== isPlayingRef.current) {
-          if (state.isPlaying) {
-            audioRef.current?.play().catch(() => {});
-            setIsPlaying(true);
-          } else {
-            audioRef.current?.pause();
-            setIsPlaying(false);
-          }
-        }
-        if (state.currentTime !== undefined && state.timestamp) {
-          const latency = (Date.now() - state.timestamp) / 1000;
-          const targetTime = state.currentTime + latency;
-          if (audioRef.current && Math.abs(audioRef.current.currentTime - targetTime) > 0.5) {
-            audioRef.current.currentTime = targetTime;
-          }
-        }
+        // Don't auto-play on sync - just update the state
+        // User must press play manually
       }
     });
 
@@ -192,10 +183,7 @@ const Room = () => {
               setQueue(state.queue);
             }
             setCurrentIndex(state.currentTrackIndex || 0);
-            if (state.isPlaying) {
-              audioRef.current?.play().catch(() => {});
-              setIsPlaying(true);
-            }
+            // Don't auto-play when joining - keep paused
           }
         });
       }
@@ -364,10 +352,7 @@ const Room = () => {
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
-      }).catch(() => {});
+      // Don't auto-play on previous - user must press play
     }
   };
 
@@ -388,10 +373,7 @@ const Room = () => {
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
-      audio.play().then(() => {
-        setIsPlaying(true);
-        broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
-      }).catch(() => {});
+      // Don't auto-play when clicking track - user must press play
     }
   };
 
