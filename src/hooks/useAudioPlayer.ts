@@ -18,6 +18,10 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
   const onTrackEndedRef = useRef(onTrackEnded);
   onTrackEndedRef.current = onTrackEnded;
 
+  // Track change state to prevent race conditions
+  const isTrackChangingRef = useRef(false);
+  const pendingPlayRef = useRef(false);
+
   // Initialize audio element once
   useEffect(() => {
     const audio = new Audio();
@@ -33,11 +37,19 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
 
     const handleLoadedMetadata = () => {
       setDuration(audio.duration);
-      isLoadedRef.current = true;
     };
 
     const handleCanPlay = () => {
       isLoadedRef.current = true;
+      isTrackChangingRef.current = false;
+      
+      // If we were asked to play while loading, do it now
+      if (pendingPlayRef.current) {
+        pendingPlayRef.current = false;
+        audio.play().then(() => {
+          setIsPlaying(true);
+        }).catch(console.error);
+      }
     };
 
     const handleWaiting = () => {
@@ -85,10 +97,14 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     };
   }, []);
 
-  // Update track source when track changes - but DON'T auto-play
+  // Update track source when track changes - NO auto-play
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !track) return;
+
+    // Mark that we're changing tracks
+    isTrackChangingRef.current = true;
+    pendingPlayRef.current = false;
 
     // Pause current playback when track changes
     audio.pause();
@@ -110,7 +126,15 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
 
   const play = useCallback(async () => {
     const audio = audioRef.current;
-    if (!audio || !isLoadedRef.current) {
+    if (!audio) return;
+
+    // If track is still loading, mark that we want to play when ready
+    if (isTrackChangingRef.current) {
+      pendingPlayRef.current = true;
+      return;
+    }
+
+    if (!isLoadedRef.current) {
       // Wait for audio to load
       await new Promise<void>((resolve) => {
         const checkLoaded = setInterval(() => {
@@ -141,6 +165,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
   const pause = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    pendingPlayRef.current = false;
     audio.pause();
     setIsPlaying(false);
   }, []);
