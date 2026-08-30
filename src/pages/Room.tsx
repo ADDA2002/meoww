@@ -12,6 +12,7 @@ import {
   ArrowUp, 
   ArrowDown, 
   Trash2, 
+  Radio, 
   Music, 
   Upload, 
   Users,
@@ -158,12 +159,9 @@ const Room = () => {
   };
 
   // Generate a unique name by adding a number suffix with a space if there's a conflict
-  // The `excludeId` parameter allows excluding a specific user (typically the new joiner themselves)
-  const generateUniqueName = (baseName: string, existingUsers: RoomUser[], excludeId?: string): string => {
+  const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
     const normalizedBase = baseName.trim().toLowerCase();
-    const existingNames = existingUsers
-      .filter(u => u.id !== excludeId)
-      .map(u => u.name.trim().toLowerCase());
+    const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
     
     if (!existingNames.includes(normalizedBase)) {
       return baseName;
@@ -242,8 +240,7 @@ const Room = () => {
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
     conn.on("open", () => {
       if (isHostRef.current) {
-        // Exclude the connecting user's own id from the uniqueness check
-        const uniqueName = generateUniqueName(me.name, usersRef.current, conn.peer);
+        const uniqueName = generateUniqueName(me.name, usersRef.current);
         const updatedUser = { ...me, name: uniqueName };
 
         if (uniqueName !== me.name) {
@@ -325,8 +322,7 @@ const Room = () => {
 
       case "JOIN": {
         if (isHostRef.current) {
-          // Exclude the sender from uniqueness check to avoid name conflicts with itself
-          const uniqueName = generateUniqueName(msg.user.name, usersRef.current, senderPeerId);
+          const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
           const updatedUser = { ...msg.user, name: uniqueName };
 
           const newUser = updatedUser;
@@ -454,6 +450,19 @@ const Room = () => {
         }
         break;
       }
+
+      case "HOST_TRANSFER": {
+        if (msg.newHostId === myId) {
+          setIsHost(true);
+          toast.success("You are now the Host of this Jam!");
+        } else {
+          setIsHost(false);
+        }
+        setUsers((prev) =>
+          prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId }))
+        );
+        break;
+      }
     }
   };
 
@@ -461,6 +470,21 @@ const Room = () => {
   const handlePeerDisconnect = (disconnectedId: string) => {
     const remainingUsers = usersRef.current.filter((u) => u.id !== disconnectedId);
     setUsers(remainingUsers);
+
+    const wasHost = usersRef.current.find((u) => u.id === disconnectedId)?.isHost;
+    if (wasHost && remainingUsers.length > 0) {
+      const sorted = [...remainingUsers].sort((a, b) => a.joinedAt - b.joinedAt);
+      const nextHost = sorted[0];
+
+      if (nextHost.id === myId) {
+        setIsHost(true);
+        toast.success("Host left. You are now the host!");
+        broadcast({
+          type: "HOST_TRANSFER",
+          newHostId: nextHost.id,
+        });
+      }
+    }
   };
 
   // Play a specific track from a given seek time, ensuring audio is loaded
@@ -704,6 +728,19 @@ const Room = () => {
     });
   };
 
+  const handleTransferHost = (targetUserId: string) => {
+    if (!isHost) return;
+    setIsHost(false);
+    setUsers((prev) =>
+      prev.map((u) => ({ ...u, isHost: u.id === targetUserId }))
+    );
+    broadcast({
+      type: "HOST_TRANSFER",
+      newHostId: targetUserId,
+    });
+    toast.info("Host controls transferred.");
+  };
+
   const handleLeaveRoom = () => {
     navigate("/");
   };
@@ -891,6 +928,13 @@ const Room = () => {
                       <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
                         HOST
                       </span>
+                    ) : isHost ? (
+                      <button
+                        onClick={() => handleTransferHost(user.id)}
+                        className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-neutral-800 transition-colors cursor-pointer"
+                      >
+                        MAKE HOST
+                      </button>
                     ) : (
                       <span className="text-gray-400 text-[10px]">Listener</span>
                     )}
