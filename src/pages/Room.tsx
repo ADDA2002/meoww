@@ -19,7 +19,8 @@ import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
-const SYNC_THRESHOLD_SECONDS = 0.5;
+// Target-end-time sync: give buffer for slow devices to receive the message
+const SYNC_BUFFER_MS = 3000; // 3 second buffer - message must arrive this much before target end time
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -49,15 +50,20 @@ const Room = () => {
   const [kicked, setKicked] = useState<boolean>(false);
   const [banned, setBanned] = useState<boolean>(false);
 
+  // Playback state for UI display
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+
   // Refs for sync
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
   const vetoActiveRef = useRef(vetoActive);
   const isInitializedRef = useRef(false);
-  const isPlayingRef = useRef(false);
   const lastVetoToastRef = useRef<boolean | null>(null);
-  const lastSyncTimeRef = useRef<number>(0);
+  
+  // NEW: Target-end-time sync refs
+  const scheduledStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduledEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestStateRef = useRef<FirebaseSyncState | null>(null);
 
   currentIndexRef.current = currentIndex;
@@ -68,22 +74,8 @@ const Room = () => {
   const currentTrack = queue[currentIndex] || null;
   const controlsLocked = !isHost && vetoActive;
 
-  const handleTrackEnded = useCallback(() => {
-    if (queueRef.current.length === 0) return;
-    isPlayingRef.current = false;
-
-    const nextIdx = isShuffleRef.current
-      ? Math.floor(Math.random() * queueRef.current.length)
-      : (currentIndexRef.current + 1) % queueRef.current.length;
-
-    setCurrentIndex(nextIdx);
-    setTimeout(() => {
-      playRef.current?.();
-    }, 100);
-  }, []);
-
+  // Audio player hook
   const {
-    isPlaying,
     isMuted,
     setIsMuted,
     currentTime,
@@ -100,34 +92,121 @@ const Room = () => {
     onTrackEnded: handleTrackEnded,
   });
 
-  isPlayingRef.current = isPlaying;
+  // Handle track end - advance to next track
+  function handleTrackEnded() {
+    if (queueRef.current.length === 0) return;
+
+    const nextIdx = isShuffleRef.current
+      ? Math.floor(Math.random() * queueRef.current.length)
+      : (currentIndexRef.current + 1) % queueRef.current.length;
+
+    setCurrentIndex(nextIdx);
+    
+    // Auto-advance: play next track automatically (host only)
+    if (isHost) {
+      setTimeout(() => {
+        playRef.current?.();
+        updatePlaybackStateRef.current?.({
+          currentTrackIndex: nextIdx,
+          targetEndTime: null, // Will be set when play is called
+          trackDuration: null,
+        });
+      }, 100);
+    }
+  }
 
   const playRef = useRef(play);
   const pauseRef = useRef(pause);
-  const seekRef = useRef(seek);
   const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
-  const getCurrentTimeRef = useRef(getCurrentTime);
+  const broadcastRef = useRef<((msg: SyncMessage) => void) | null>(null);
 
   playRef.current = play;
   pauseRef.current = pause;
-  seekRef.current = seek;
-  getCurrentTimeRef.current = getCurrentTime;
 
+  // Clear any scheduled playback timers
+  const clearScheduledTimers = useCallback(() => {
+    if (scheduledStartTimerRef.current) {
+      clearTimeout(scheduledStartTimerRef.current);
+      scheduledStartTimerRef.current = null;
+    }
+    if (scheduledEndTimerRef.current) {
+      clearTimeout(scheduledEndTimerRef.current);
+      scheduledEndTimerRef.current = null;
+    }
+  }, []);
+
+  // Calculate localStartTime from targetEndTime and duration
+  const calculateLocalStartTime = (targetEndTime: number, durationMs: number): number => {
+    return targetEndTime - durationMs;
+  };
+
+  // Schedule playback to start at localStartTime and end at targetEndTime
+  const schedulePlayback = useCallback((targetEndTime: number, durationMs: number) => {
+    clearScheduledTimers();
+    
+    const now = Date.now();
+    const localStartTime = calculateLocalStartTime(targetEndTime, durationMs);
+    const timeUntilStart = localStartTime - now;
+    
+    console.log(`[Room] Scheduling playback: targetEndTime=${targetEndTime}, durationMs=${durationMs}, localStartTime=${localStartTime}, now=${now}, timeUntilStart=${timeUntilStart}ms`);
+    
+    if (timeUntilStart <= 0) {
+      // We're already past the start time - play immediately
+      console.log(`[Room] Past start time, playing now`);
+      playRef.current?.();
+      setIsPlaying(true);
+      
+      // Schedule pause at target end time
+      const timeUntilEnd = targetEndTime - Date.now();
+      if (timeUntilEnd > 0) {
+        scheduledEndTimerRef.current = setTimeout(() => {
+          console.log(`[Room] Target end time reached, pausing`);
+          pauseRef.current?.();
+          setIsPlaying(false);
+        }, timeUntilEnd);
+      }
+    } else {
+      // Schedule start
+      scheduledStartTimerRef.current = setTimeout(() => {
+        console.log(`[Room] Scheduled start time reached, playing`);
+        playRef.current?.();
+        setIsPlaying(true);
+        
+        // Schedule pause at target end time
+        const actualEndTime = targetEndTime;
+        const timeUntilEnd = actualEndTime - Date.now();
+        if (timeUntilEnd > 0) {
+          scheduledEndTimerRef.current = setTimeout(() => {
+            console.log(`[Room] Target end time reached, pausing`);
+            pauseRef.current?.();
+            setIsPlaying(false);
+          }, timeUntilEnd);
+        }
+      }, timeUntilStart);
+    }
+  }, [clearScheduledTimers]);
+
+  // Handle state changes from Firebase - TARGET END TIME SYNC
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     console.log(`[Room] State change:`, state);
+    latestStateRef.current = state;
+    
+    // Only non-host members should follow host's state
     if (isHost) return;
     
     const newIndex = state.currentTrackIndex ?? 0;
-    const newTime = state.currentTime ?? 0;
-    const newIsPlaying = state.isPlaying ?? false;
     const newQueue = state.queue || [];
     const newVetoActive = state.vetoActive ?? true;
+    const targetEndTime = state.targetEndTime;
+    const trackDuration = state.trackDuration;
     
+    // Update queue if different
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
       console.log(`[Room] Updating queue from state: ${newQueue.length} tracks`);
       setQueue(newQueue);
     }
     
+    // Handle veto state change
     if (newVetoActive !== vetoActiveRef.current) {
       setVetoActive(newVetoActive);
       if (lastVetoToastRef.current !== null) {
@@ -140,37 +219,21 @@ const Room = () => {
       lastVetoToastRef.current = newVetoActive;
     }
     
+    // Handle track change
     if (newIndex !== currentIndexRef.current) {
       console.log(`[Room] Track change: ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
-    }
-    
-    if (newIsPlaying) {
-      const timeDiff = Math.abs(getCurrentTimeRef.current() - newTime);
-      console.log(`[Room] Sync check: current=${getCurrentTimeRef.current()}, host=${newTime}, diff=${timeDiff}`);
       
-      if (!isPlayingRef.current || timeDiff > SYNC_THRESHOLD_SECONDS) {
-        console.log(`[Room] Syncing play at ${newTime} (timeDiff: ${timeDiff.toFixed(2)}s)`);
-        seekRef.current(newTime);
-        setTimeout(() => {
-          playRef.current?.();
-        }, 100);
-        lastSyncTimeRef.current = Date.now();
+      // If we have target end time info, schedule playback for the new track
+      if (targetEndTime !== null && trackDuration !== null) {
+        schedulePlayback(targetEndTime, trackDuration);
       }
-    } else {
-      if (isPlayingRef.current) {
-        console.log(`[Room] Syncing pause at ${newTime}`);
-        seekRef.current(newTime);
-        pauseRef.current?.();
-        lastSyncTimeRef.current = Date.now();
-      }
+    } else if (targetEndTime !== null && trackDuration !== null) {
+      // Same track index but new timing info - reschedule
+      console.log(`[Room] Rescheduling playback for same track`);
+      schedulePlayback(targetEndTime, trackDuration);
     }
-  }, [isHost]);
-
-  const handleStateChangeWithStore = useCallback((state: FirebaseSyncState) => {
-    latestStateRef.current = state;
-    handleStateChange(state);
-  }, [handleStateChange]);
+  }, [isHost, schedulePlayback]);
 
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
     console.log(`[Room] Received message:`, msg.type);
@@ -179,6 +242,7 @@ const Room = () => {
       case "USER_LIST":
         setUsers(msg.users);
         break;
+        
       case "KICK_USER": {
         if (msg.targetId === myId) {
           setKicked(true);
@@ -189,6 +253,7 @@ const Room = () => {
         }
         break;
       }
+      
       case "BAN_USER": {
         if (msg.targetId === myId) {
           setBanned(true);
@@ -204,19 +269,22 @@ const Room = () => {
 
   const handleSessionEnded = useCallback(() => {
     console.log(`[Room] Session ended`);
+    clearScheduledTimers();
     setSessionEnded(true);
-  }, []);
+  }, [clearScheduledTimers]);
 
-  // Initialize connection - this MUST be before the auto-resync useEffect
+  // Initialize connection
   useEffect(() => {
     if (!roomCode) return;
+
     const generatedId = isHost
       ? `host-${roomCode.toLowerCase()}`
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
+    
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
-  // Firebase sync hook - MUST be before any useEffect that uses isConnected
+  // Firebase sync hook
   const { isConnected, updatePlaybackState, kickUser, banUser, getUsers, getState } = useFirebaseSync({
     roomCode,
     myId,
@@ -226,13 +294,14 @@ const Room = () => {
     currentIndex,
     isPlaying,
     onMessage: handleIncomingMessage,
-    onStateChange: handleStateChangeWithStore,
+    onStateChange: handleStateChange,
     onSessionEnded: handleSessionEnded,
   });
 
-  // Store refs - AFTER useFirebaseSync
+  // Store refs
   useEffect(() => {
     updatePlaybackStateRef.current = updatePlaybackState;
+    broadcastRef.current = broadcast;
   }, [updatePlaybackState]);
 
   // Load initial state when connected (for members joining mid-session)
@@ -242,21 +311,31 @@ const Room = () => {
 
     const loadInitialState = async () => {
       console.log(`[Room] Loading initial state...`);
+      
       try {
         const state = await getState();
         if (state) {
           console.log(`[Room] Got initial state:`, state);
+          
           if (state.queue && state.queue.length > 0) {
             setQueue(state.queue);
           }
+          
           if (state.currentTrackIndex !== undefined) {
             setCurrentIndex(state.currentTrackIndex);
           }
+          
           if (state.vetoActive !== undefined) {
             setVetoActive(state.vetoActive);
             lastVetoToastRef.current = state.vetoActive;
           }
+          
+          // If there's active playback, schedule it
+          if (state.targetEndTime !== null && state.trackDuration !== null) {
+            schedulePlayback(state.targetEndTime, state.trackDuration);
+          }
         }
+        
         const userList = await getUsers();
         if (userList.length > 0) {
           setUsers(userList);
@@ -265,55 +344,60 @@ const Room = () => {
         console.error(`[Room] Error loading initial state:`, err);
       }
     };
-    loadInitialState();
-  }, [isConnected, myId, isHost, getState, getUsers]);
 
-  // Auto-resync check for members - AFTER isConnected is initialized
-  useEffect(() => {
-    if (isHost || !isConnected) return;
+    loadInitialState();
+  }, [isConnected, myId, isHost, getState, getUsers, schedulePlayback]);
+
+  // Calculate target end time from current position and broadcast to members
+  const calculateAndBroadcastTargetEndTime = useCallback(() => {
+    if (!isHost || !updatePlaybackStateRef.current) return;
     
-    const checkInterval = setInterval(() => {
-      const state = latestStateRef.current;
-      if (!state) return;
-      if (!state.isPlaying || !isPlayingRef.current) return;
-      if (Date.now() - lastSyncTimeRef.current < 2000) return;
-      
-      const hostTime = state.currentTime;
-      const myTime = audioRef.current?.currentTime || 0;
-      const drift = Math.abs(myTime - hostTime);
-      
-      if (drift > SYNC_THRESHOLD_SECONDS) {
-        console.log(`[Room] Auto-resync triggered: drift=${drift.toFixed(2)}s > ${SYNC_THRESHOLD_SECONDS}s`);
-        seekRef.current(hostTime);
-        lastSyncTimeRef.current = Date.now();
-      }
-    }, 1000);
+    const audio = audioRef.current;
+    if (!audio || !currentTrack) return;
     
-    return () => clearInterval(checkInterval);
-  }, [isHost, isConnected]);
+    const now = Date.now();
+    const currentPos = audio.currentTime || 0;
+    const totalDuration = audio.duration || 0;
+    const remainingMs = (totalDuration - currentPos) * 1000;
+    
+    // Target end time = now + buffer + remaining duration
+    // This ensures all devices have time to receive the message before playback should end
+    const targetEndTime = now + SYNC_BUFFER_MS + remainingMs;
+    
+    console.log(`[Room] Broadcasting target end time: now=${now}, currentPos=${currentPos}s, remaining=${remainingMs}ms, targetEndTime=${targetEndTime}`);
+    
+    updatePlaybackStateRef.current({
+      currentTrackIndex: currentIndexRef.current,
+      targetEndTime,
+      trackDuration: remainingMs,
+      queue: queueRef.current,
+    });
+  }, [isHost]);
 
   const handleTogglePlay = useCallback(() => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
       return;
     }
-    if (isPlayingRef.current) {
+
+    clearScheduledTimers();
+
+    if (isPlaying) {
       pauseRef.current?.();
-      const time = getCurrentTime();
+      setIsPlaying(false);
       updatePlaybackStateRef.current?.({
-        isPlaying: false,
-        currentTime: time,
+        currentTrackIndex: currentIndexRef.current,
+        targetEndTime: null,
+        trackDuration: null,
+        queue: queueRef.current,
       });
     } else {
       playRef.current?.();
-      updatePlaybackStateRef.current?.({
-        isPlaying: true,
-        currentTrackIndex: currentIndexRef.current,
-        currentTime: getCurrentTime(),
-        queue: queueRef.current,
-      });
+      setIsPlaying(true);
+      // Calculate and broadcast target end time
+      calculateAndBroadcastTargetEndTime();
     }
-  }, [isHost, getCurrentTime]);
+  }, [isHost, isPlaying, calculateAndBroadcastTargetEndTime, clearScheduledTimers]);
 
   const handleNext = useCallback(() => {
     if (!isHost) {
@@ -322,21 +406,21 @@ const Room = () => {
     }
     if (queueRef.current.length === 0) return;
     
+    clearScheduledTimers();
+    
     const nextIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
     setCurrentIndex(nextIdx);
+    setIsPlaying(true);
+    
     setTimeout(() => {
       playRef.current?.();
-      updatePlaybackStateRef.current?.({
-        isPlaying: true,
-        currentTrackIndex: nextIdx,
-        currentTime: 0,
-        queue: queueRef.current,
-      });
+      // Calculate and broadcast for new track
+      calculateAndBroadcastTargetEndTime();
     }, 100);
-  }, [isHost]);
+  }, [isHost, clearScheduledTimers, calculateAndBroadcastTargetEndTime]);
 
   const handlePrevious = useCallback(() => {
     if (!isHost) {
@@ -345,49 +429,46 @@ const Room = () => {
     }
     if (queueRef.current.length === 0) return;
     
+    clearScheduledTimers();
+    
     const prevIdx = isShuffleRef.current
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
     setCurrentIndex(prevIdx);
+    setIsPlaying(true);
+    
     setTimeout(() => {
       playRef.current?.();
-      updatePlaybackStateRef.current?.({
-        isPlaying: true,
-        currentTrackIndex: prevIdx,
-        currentTime: 0,
-        queue: queueRef.current,
-      });
+      calculateAndBroadcastTargetEndTime();
     }, 100);
-  }, [isHost]);
+  }, [isHost, clearScheduledTimers, calculateAndBroadcastTargetEndTime]);
 
   const handleTrackClick = useCallback((idx: number) => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
       return;
     }
+
+    clearScheduledTimers();
     setCurrentIndex(idx);
+    setIsPlaying(true);
+    
     setTimeout(() => {
       playRef.current?.();
-      updatePlaybackStateRef.current?.({
-        isPlaying: true,
-        currentTrackIndex: idx,
-        currentTime: 0,
-        queue: queueRef.current,
-      });
+      calculateAndBroadcastTargetEndTime();
     }, 100);
-  }, [isHost]);
+  }, [isHost, clearScheduledTimers, calculateAndBroadcastTargetEndTime]);
 
   const handleSeekFromBar = useCallback((time: number) => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
       return;
     }
-    seekRef.current(time);
-    updatePlaybackStateRef.current?.({
-      currentTime: time,
-    });
-  }, [isHost]);
+    seekRef.current?.(time);
+    // Recalculate and broadcast new target end time after seek
+    calculateAndBroadcastTargetEndTime();
+  }, [isHost, calculateAndBroadcastTargetEndTime]);
 
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
@@ -397,8 +478,10 @@ const Room = () => {
       url: song.url,
       addedBy: userName,
     };
+
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
+    
     updatePlaybackStateRef.current?.({
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
@@ -416,8 +499,10 @@ const Room = () => {
       addedBy: userName,
       isLocalFile: true,
     };
+
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
+    
     updatePlaybackStateRef.current?.({
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
@@ -434,6 +519,7 @@ const Room = () => {
       toast.error("Only the host can reorder the queue.");
       return;
     }
+    
     if (direction === "up" && idx === 0) return;
     if (direction === "down" && idx === queueRef.current.length - 1) return;
 
@@ -447,6 +533,7 @@ const Room = () => {
 
     setQueue(newQueue);
     setCurrentIndex(newActive);
+    
     updatePlaybackStateRef.current?.({
       queue: newQueue,
       currentTrackIndex: newActive,
@@ -458,6 +545,7 @@ const Room = () => {
       toast.error("Only the host can remove tracks.");
       return;
     }
+    
     if (queueRef.current.length <= 1) {
       toast.error("Queue must have at least one track.");
       return;
@@ -469,6 +557,7 @@ const Room = () => {
     
     setQueue(newQueue);
     setCurrentIndex(newActive);
+    
     updatePlaybackStateRef.current?.({
       queue: newQueue,
       currentTrackIndex: newActive,
@@ -480,7 +569,9 @@ const Room = () => {
     const next = !vetoActiveRef.current;
     setVetoActive(next);
     vetoActiveRef.current = next;
+    
     toast.success(next ? "Member controls locked." : "Member controls restored.");
+    
     updatePlaybackStateRef.current?.({
       vetoActive: next,
     });
@@ -499,6 +590,7 @@ const Room = () => {
   }, [isHost, banUser]);
 
   const handleLeaveRoom = () => {
+    clearScheduledTimers();
     navigate("/");
   };
 
@@ -510,6 +602,13 @@ const Room = () => {
     navigate("/");
   };
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      clearScheduledTimers();
+    };
+  }, [clearScheduledTimers]);
+
   if (sessionEnded) {
     return (
       <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
@@ -519,7 +618,9 @@ const Room = () => {
           </div>
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase">Session Ended</h1>
-            <p className="text-gray-600 font-mono text-sm">The host has left the session.</p>
+            <p className="text-gray-600 font-mono text-sm">
+              The host has left the session.
+            </p>
           </div>
           <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
@@ -538,7 +639,9 @@ const Room = () => {
           </div>
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase">You Have Been Kicked</h1>
-            <p className="text-gray-600 font-mono text-sm">The host has removed you from this session.</p>
+            <p className="text-gray-600 font-mono text-sm">
+              The host has removed you from this session.
+            </p>
           </div>
           <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
@@ -557,7 +660,9 @@ const Room = () => {
           </div>
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight uppercase text-red-600">You Have Been Banned</h1>
-            <p className="text-gray-600 font-mono text-sm">The host has permanently banned you from this session.</p>
+            <p className="text-gray-600 font-mono text-sm">
+              The host has permanently banned you from this session.
+            </p>
           </div>
           <Button onClick={handleGoHome} className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider">
             Return to Home
@@ -603,7 +708,7 @@ const Room = () => {
                   {isHost ? "YOU ARE HOST" : "SYNCED WITH HOST"}
                 </span>
               </div>
-              <span className="text-gray-500">FIREBASE REALTIME</span>
+              <span className="text-gray-500">TARGET-END SYNC</span>
             </div>
 
             <TrackInfo track={currentTrack} />
@@ -634,7 +739,12 @@ const Room = () => {
         </div>
 
         <div className="lg:col-span-5 space-y-6">
-          <UserList users={users} myId={myId} isHost={isHost} />
+          <UserList
+            users={users}
+            myId={myId}
+            isHost={isHost}
+          />
+
           <QueueList
             queue={queue}
             currentIndex={currentIndex}
@@ -650,7 +760,7 @@ const Room = () => {
       </main>
 
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
-        Meoww - Firebase Powered Audio Sync
+        Meoww - Target-End-Time Audio Sync
       </footer>
     </div>
   );

@@ -5,11 +5,12 @@ export interface FirebaseSyncState {
   roomCode: string;
   hostId: string;
   currentTrackIndex: number;
-  isPlaying: boolean;
-  currentTime: number;
+  // NEW: Target end-time sync approach
+  targetEndTime: number | null; // Unix timestamp (ms) when track should finish playing
+  trackDuration: number | null; // Duration of current track in ms (for client calculation)
   queue: Track[];
   vetoActive?: boolean;
-  lastUpdateId: string; // Unique ID for each state update to prevent loops
+  lastUpdateId: string;
   lastUpdated: number;
 }
 
@@ -88,8 +89,8 @@ class FirebaseSignaling {
               roomCode: this.roomCode,
               hostId: this.myId,
               currentTrackIndex: 0,
-              isPlaying: false,
-              currentTime: 0,
+              targetEndTime: null,
+              trackDuration: null,
               queue: [],
               vetoActive: true,
               lastUpdateId: `init-${Date.now()}`,
@@ -159,7 +160,7 @@ class FirebaseSignaling {
           return;
         }
         this.lastProcessedUpdateId = state.lastUpdateId || "";
-        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex);
+        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "trackIdx:", state.currentTrackIndex, "targetEndTime:", state.targetEndTime);
         this.notifyStateChange(state);
       }
     }, (error: any) => {
@@ -235,6 +236,7 @@ class FirebaseSignaling {
   }
 
   // Update room state (PRIMARY sync mechanism for playback)
+  // NEW: Uses target-end-time synchronization
   updateState(updates: Partial<FirebaseSyncState>) {
     if (!db || !this.stateRef) return;
 
