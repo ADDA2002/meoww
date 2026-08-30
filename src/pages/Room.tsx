@@ -91,9 +91,9 @@ const Room = () => {
     }
   }, []);
 
-  // Audio player hook
+  // Audio player hook (for non-host, this also drives UI)
   const {
-    isPlaying,
+    isPlaying: audioPlayerIsPlaying,
     isMuted,
     setIsMuted,
     currentTime,
@@ -109,7 +109,25 @@ const Room = () => {
     onTrackEnded: handleTrackEnded,
   });
 
+  /**
+   * Derive the REAL isPlaying state.
+   * The host's playback happens via syncScheduler (precision-timed).
+   * Members' playback happens via useAudioPlayer (seek+play).
+   * We track both and combine them.
+   */
+  const [schedulerIsPlaying, setSchedulerIsPlaying] = useState(false);
+  const isPlaying = isHost ? schedulerIsPlaying : audioPlayerIsPlaying;
   isPlayingRef.current = isPlaying;
+
+  // Subscribe to scheduler to know when host's music is actually playing
+  useEffect(() => {
+    if (!isHost) return;
+    const unsub = syncScheduler.subscribe((tracks) => {
+      const anyPlaying = tracks.some(t => t.status === "playing");
+      setSchedulerIsPlaying(anyPlaying);
+    });
+    return () => unsub();
+  }, [isHost]);
 
   // Keep play/pause refs updated
   const playRef = useRef(play);
@@ -378,20 +396,19 @@ const Room = () => {
       return;
     }
 
-    if (isPlayingRef.current) {
-      pauseRef.current?.();
+    if (schedulerIsPlaying) {
+      // Currently playing -> pause
       syncScheduler.clear();
-      const time = getCurrentTime();
       updatePlaybackStateRef.current?.({
         isPlaying: false,
-        currentTime: time,
-        targetSyncedTime: undefined, // Clear any scheduled time
+        currentTime: 0,
+        targetSyncedTime: undefined,
       });
     } else {
-      // Schedule the current track to play in 2 seconds
+      // Not playing -> schedule current track
       scheduleTrackForPlayback(currentIndexRef.current, 2000);
     }
-  }, [isHost, getCurrentTime, scheduleTrackForPlayback]);
+  }, [isHost, schedulerIsPlaying, scheduleTrackForPlayback]);
 
   const handleNext = useCallback(() => {
     if (!isHost) {
@@ -435,7 +452,11 @@ const Room = () => {
       toast.error("Only the host can control playback.");
       return;
     }
-    seekRef.current(time);
+    // Seek the scheduler's audio element if it's playing
+    const schedulerAudio = syncScheduler.getAudioElement();
+    if (schedulerAudio) {
+      schedulerAudio.currentTime = time;
+    }
     updatePlaybackStateRef.current?.({
       currentTime: time,
     });
