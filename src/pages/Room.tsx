@@ -28,9 +28,9 @@ const Room = () => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentIndexRef = useRef(currentIndex);
@@ -44,7 +44,7 @@ const Room = () => {
   const currentTrack = queue[currentIndex] || null;
   const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
 
-  // Play a track from the beginning
+  // Play a track from the beginning — used for next/prev buttons and auto-play
   const playTrack = useCallback((idx: number) => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -53,8 +53,8 @@ const Room = () => {
     if (!track) return;
 
     setCurrentIndex(idx);
-    setCurrentTime(0); // Reset to 0:00
-    audio.currentTime = 0; // Reset audio playback position
+    setCurrentTime(0);
+    audio.currentTime = 0;
 
     if (audio.src !== track.url) {
       audio.src = track.url;
@@ -101,7 +101,7 @@ const Room = () => {
     setCurrentIndex(newIndex);
   }, [isHost]);
 
-  const handleIncomingMessage = useCallback((msg: SyncMessage) => {
+  const handleIncomingMessage = useCallback((_msg: SyncMessage) => {
   }, []);
 
   // Initialize audio element
@@ -115,6 +115,7 @@ const Room = () => {
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
+      setIsPlaying(false);
       if (queueRef.current.length > 0) {
         const nextIdx = isShuffleRef.current
           ? Math.floor(Math.random() * queueRef.current.length)
@@ -140,7 +141,7 @@ const Room = () => {
     };
   }, []);
 
-  // Update audio source when track changes
+  // Load track into audio element but keep paused
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
@@ -148,6 +149,8 @@ const Room = () => {
     audio.pause();
     audio.src = currentTrack.url;
     audio.load();
+    setCurrentTime(0);
+    audio.currentTime = 0;
   }, [currentTrack]);
 
   const { updatePlaybackState } = useFirebaseSync({
@@ -190,7 +193,7 @@ const Room = () => {
     }
   }, []);
 
-  // Next track
+  // Next track — auto-plays
   const handleNext = useCallback(() => {
     if (queueRef.current.length === 0) return;
 
@@ -201,7 +204,7 @@ const Room = () => {
     playTrack(nextIdx);
   }, [playTrack]);
 
-  // Previous track
+  // Previous track — auto-plays
   const handlePrevious = useCallback(() => {
     if (queueRef.current.length === 0) return;
 
