@@ -1,3 +1,4 @@
+import { Menu } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 interface HeaderProps {
@@ -5,7 +6,7 @@ interface HeaderProps {
   onMenuClick?: () => void;
 }
 
-export const Header = ({ showRoomOptions = false, onMenuClick }: HeaderProps) => {
+const Header = ({ showRoomOptions = false, onMenuClick }: HeaderProps) => {
   const location = useLocation();
   const isRoomPage = location.pathname.startsWith("/room/");
 
@@ -26,10 +27,12 @@ export const Header = ({ showRoomOptions = false, onMenuClick }: HeaderProps) =>
             className="hover:bg-gray-100 p-1 rounded"
             aria-label="Open room options"
           >
-            <span className="text-xs font-mono text-gray-500">SYNCED</span>
+            <Menu className="w-4 h-4 text-gray-600 hover:text-black transition-colors" />
           </button>
         )}
       </div>
     </header>
   );
 };
+
+export default Header;

@@ -1,21 +1,4 @@
-import type { Track } from "@/types/music";
-
-export const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-
-export const generateRoomCode = (length: number = 6): string => {
-  return Array.from({ length }, () =>
-    ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]
-  ).join("");
-};
-
-export const formatDisplayName = (name: string): string => {
-  if (!name) return "";
-  const trimmed = name.trim();
-  if (!trimmed) return "";
-  const firstChar = trimmed.charAt(0).toUpperCase();
-  const rest = trimmed.slice(1).toLowerCase();
-  return firstChar + rest;
-};
+import { Track } from "@/types/music";
 
 export const DEFAULT_TRACKS: Track[] = [
   {
