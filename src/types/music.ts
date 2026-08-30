@@ -3,7 +3,6 @@ export interface Track {
   title: string;
   artist: string;
   url: string;
-  duration?: number;
   cover?: string;
   addedBy?: string;
   isLocalFile?: boolean;
@@ -16,6 +15,7 @@ export interface RoomUser {
   joinedAt: number;
 }
 
+// Sync messages between host and listeners
 export type SyncMessage =
   | { type: "JOIN"; user: RoomUser }
   | { type: "NAME_UPDATE"; newName: string; originalName: string }

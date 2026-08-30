@@ -1,4 +1,10 @@
-import { Track } from "@/types/music";
+export const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+export const generateRoomCode = (length: number = 6): string => {
+  return Array.from({ length }, () =>
+    ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]
+  ).join("");
+};
 
 export const DEFAULT_TRACKS: Track[] = [
   {
@@ -34,3 +40,5 @@ export const DEFAULT_TRACKS: Track[] = [
     addedBy: "System",
   }
 ];
+
+import type { Track } from "@/types/music";
