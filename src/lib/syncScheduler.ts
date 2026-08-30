@@ -3,11 +3,11 @@
  * 
  * Handles the lifecycle of a synchronized track:
  * - Phase 2: Receives "play at" target timestamp from server
- * - Phase 3: Pre-fetches audio file progressively (starts playback when buffered)
+ * - Phase 3: Pre-fetches audio file into memory (Blob) during buffer window
  * - Phase 4: Triggers playback at the exact synced millisecond
  * 
- * OPTIMIZATION: Progressive loading - doesn't wait for full download,
- * starts playback once enough data is buffered (~1 second before target time)
+ * Key insight: We wait for audio to be FULLY BUFFERED before the target time,
+ * then trigger .play() at the precise synced moment for zero-delay playback.
  */
 
 import { syncedClock } from "./syncedClock";
@@ -17,14 +17,12 @@ export interface ScheduledTrack {
   track: Track;
   // The "global target time" (synced clock ms) when playback should START
   targetSyncedTime: number;
-  // The audio URL (can be blob URL or original URL for progressive loading)
-  audioUrl: string;
+  // The local Blob URL once the file is fully fetched
+  blobUrl?: string;
   // Status of this scheduled track
-  status: "pending" | "fetching" | "buffering" | "playing" | "failed";
+  status: "pending" | "fetching" | "buffered" | "playing" | "failed";
   // Error message if failed
   error?: string;
-  // Whether this is using blob (true) or progressive loading (false)
-  isBlob: boolean;
 }
 
 type SchedulerListener = (tracks: ScheduledTrack[]) => void;
@@ -35,22 +33,19 @@ class SyncScheduler {
   private audioElement: HTMLAudioElement | null = null;
   private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private activeTrackId: string | null = null;
-  // Buffer window: how many ms before target time to start buffering
-  private bufferWindow: number = 1500; // Start buffering 1.5s before target
 
   constructor() {
     // Create a single shared audio element
     if (typeof window !== "undefined") {
       this.audioElement = new Audio();
       this.audioElement.preload = "auto";
-      this.audioElement.crossOrigin = "anonymous";
-      console.log("[SyncScheduler] Audio element created (optimized)");
+      console.log("[SyncScheduler] Audio element created");
     }
   }
 
   /**
    * Phase 2: Schedule a track to play at a specific synced time.
-   * Uses progressive loading - starts buffering early and plays when ready.
+   * The targetSyncedTime is in milliseconds (Synced Master Time).
    */
   scheduleTrack(track: Track, targetSyncedTime: number, id?: string): string {
     const trackId = id || `scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -58,90 +53,65 @@ class SyncScheduler {
     const scheduled: ScheduledTrack = {
       track,
       targetSyncedTime,
-      audioUrl: track.url,
       status: "pending",
-      isBlob: false,
     };
 
     this.tracks.set(trackId, scheduled);
     this.notifyListeners();
 
-    const timeUntilTarget = targetSyncedTime - syncedClock.now();
-    console.log(`[SyncScheduler] 📅 Scheduled "${track.title}" for synced time ${targetSyncedTime} (in ${timeUntilTarget}ms)`);
+    console.log(`[SyncScheduler] 📅 Scheduled "${track.title}" for synced time ${targetSyncedTime} (in ${targetSyncedTime - syncedClock.now()}ms)`);
 
-    // Start pre-fetching immediately
+    // Phase 3: Start pre-fetching the audio file
     this.prefetchTrack(trackId, track.url);
 
     return trackId;
   }
 
   /**
-   * Progressive pre-fetch: Also start loading directly into the audio element
-   * so it's ready to play as soon as enough is buffered
+   * Phase 3: Pre-fetch the audio file into memory as a Blob.
+   * This avoids network stutter during playback.
    */
-  private prefetchTrack(trackId: string, url: string): void {
+  private async prefetchTrack(trackId: string, url: string): Promise<void> {
     const track = this.tracks.get(trackId);
     if (!track) return;
 
+    // Update status to fetching
     track.status = "fetching";
     this.notifyListeners();
 
-    // Also preload into the audio element directly for faster start
-    // This allows the browser to buffer the stream progressively
-    if (this.audioElement && !track.isBlob) {
-      console.log(`[SyncScheduler] 📥 Preloading audio directly: ${url}`);
-      this.audioElement.src = url;
-      this.audioElement.load();
-      
-      // Start countdown immediately - it will wait until the right moment
-      if (!this.countdownInterval) {
-        this.startCountdown();
-      }
-    }
-
-    // Also do blob fetch for backup (in case network is slow)
-    this.fetchAsBlob(trackId, url);
-  }
-
-  /**
-   * Fetch as blob for backup - this ensures we have a local copy
-   * but we don't wait for it to complete before playing
-   */
-  private async fetchAsBlob(trackId: string, url: string): Promise<void> {
-    const track = this.tracks.get(trackId);
-    if (!track) return;
-
     try {
-      console.log(`[SyncScheduler] 📥 Backup blob fetch: ${url}`);
+      console.log(`[SyncScheduler] 📥 Fetching audio: ${url}`);
       
       const response = await fetch(url);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
+      // Get the entire file as a Blob
       const blob = await response.blob();
+      
+      console.log(`[SyncScheduler] 📥 Blob created, size: ${blob.size} bytes, type: ${blob.type}`);
+      
+      // Create a local URL for the blob (this is in-memory, not network)
       const blobUrl = URL.createObjectURL(blob);
       
-      console.log(`[SyncScheduler] ✅ Blob ready: ${blob.size} bytes`);
+      console.log(`[SyncScheduler] ✅ Buffered "${track.track.title}" - Blob URL: ${blobUrl.substring(0, 50)}...`);
       
-      // If we don't have a blob yet, use this one
-      if (track && !track.isBlob) {
-        track.audioUrl = blobUrl;
-        track.isBlob = true;
-        track.status = "buffering";
-        this.notifyListeners();
-      } else if (track) {
-        // Revoke if we already have a blob (avoid memory leak)
-        URL.revokeObjectURL(blobUrl);
-      }
+      // Update track with blob URL and mark as buffered
+      track.blobUrl = blobUrl;
+      track.status = "buffered";
+      this.notifyListeners();
     } catch (err) {
-      console.warn(`[SyncScheduler] ⚠️ Blob fetch failed (using stream):`, err);
-      // Don't fail - we can still use the direct stream
+      console.error(`[SyncScheduler] ❌ Failed to fetch audio:`, err);
+      track.status = "failed";
+      track.error = err instanceof Error ? err.message : "Unknown error";
+      this.notifyListeners();
     }
   }
 
   /**
    * Phase 4: Start the precision countdown.
+   * Continuously checks the synced clock and triggers playback at the exact moment.
    */
   startCountdown(): void {
     if (this.countdownInterval) {
@@ -154,10 +124,10 @@ class SyncScheduler {
       console.log(`[SyncScheduler] ⏱️ Countdown started - synced now: ${syncedClock.now()}`);
     }
 
-    // Check every 5ms for sub-frame precision (optimized from 10ms)
+    // Check every 10ms for sub-frame precision
     this.countdownInterval = setInterval(() => {
       this.checkAndTrigger();
-    }, 5);
+    }, 10);
   }
 
   /**
@@ -173,6 +143,7 @@ class SyncScheduler {
 
   /**
    * Check if any scheduled track should play RIGHT NOW.
+   * Triggers playback at the exact synced millisecond.
    */
   private checkAndTrigger(): void {
     if (!this.audioElement) {
@@ -181,7 +152,7 @@ class SyncScheduler {
     }
 
     if (!syncedClock.isReady()) {
-      return;
+      return; // Clock not ready, skip this check
     }
 
     const syncedNow = syncedClock.now();
@@ -191,67 +162,62 @@ class SyncScheduler {
 
       const timeUntilTarget = track.targetSyncedTime - syncedNow;
       
-      // Log countdown every 500ms when close
-      if (timeUntilTarget > 0 && timeUntilTarget <= 2000 && timeUntilTarget % 500 < 5) {
-        console.log(`[SyncScheduler] ⏱️ ${timeUntilTarget}ms until "${track.track.title}" plays`);
-      }
-
-      // Start buffering early (1.5s before target)
-      if (timeUntilTarget > 0 && timeUntilTarget <= this.bufferWindow && track.status === "fetching") {
-        console.log(`[SyncScheduler] 📥 Buffering "${track.track.title}" (${timeUntilTarget}ms before target)`);
-        track.status = "buffering";
-        this.notifyListeners();
-        
-        // Ensure audio element has the source
-        if (this.audioElement.src !== track.audioUrl && track.isBlob) {
-          this.audioElement.src = track.audioUrl;
-        }
+      // Log countdown every second
+      if (timeUntilTarget > 0 && timeUntilTarget <= 5000 && timeUntilTarget % 1000 < 10) {
+        console.log(`[SyncScheduler] ⏱️ Countdown: ${(timeUntilTarget / 1000).toFixed(1)}s until "${track.track.title}" plays`);
       }
 
       // Check if we've reached the target time
       if (syncedNow >= track.targetSyncedTime) {
-        console.log(`[SyncScheduler] 🎵 Target time reached! Triggering "${track.track.title}"`);
-        this.triggerPlayback(trackId, track);
+        if (track.blobUrl) {
+          console.log(`[SyncScheduler] 🎵 Target time reached! blobUrl exists. Calling triggerPlayback for "${track.track.title}"`);
+          this.triggerPlayback(trackId, track);
+        } else {
+          console.warn(`[SyncScheduler] ⚠️ Target time reached but blobUrl is undefined! Status: ${track.status}`);
+        }
       }
     }
   }
 
   /**
-   * Execute playback at the precise synced millisecond.
+   * The Drop: Execute playback at the precise synced millisecond.
+   * Audio is already in memory, so this triggers instant execution.
    */
   private triggerPlayback(trackId: string, scheduled: ScheduledTrack): void {
     if (!this.audioElement) {
-      console.error("[SyncScheduler] ❌ No audio element!");
+      console.error("[SyncScheduler] ❌ No audio element in triggerPlayback!");
+      return;
+    }
+
+    if (!scheduled.blobUrl) {
+      console.error("[SyncScheduler] ❌ triggerPlayback called but blobUrl is undefined!");
       return;
     }
 
     console.log(`[SyncScheduler] 🎵 THE DROP: Playing "${scheduled.track.title}" at synced time ${syncedClock.now()}`);
-    console.log(`[SyncScheduler] 🎵 Using: ${scheduled.isBlob ? "blob" : "stream"} - ${scheduled.audioUrl.substring(0, 50)}...`);
+    console.log(`[SyncScheduler] 🎵 Blob URL: ${scheduled.blobUrl.substring(0, 50)}...`);
 
-    // Set source to blob if available, otherwise use stream
-    this.audioElement.src = scheduled.audioUrl;
-    this.audioElement.currentTime = 0;
+    // Set the source to the pre-fetched blob
+    this.audioElement.src = scheduled.blobUrl;
+    this.audioElement.currentTime = 0; // Start from beginning
     this.audioElement.volume = 1.0;
 
-    // Try to play!
+    // Play!
     const playPromise = this.audioElement.play();
     if (playPromise !== undefined) {
       playPromise.then(() => {
-        console.log(`[SyncScheduler] ✅ Play started successfully`);
+        console.log(`[SyncScheduler] ✅ Play started successfully for "${scheduled.track.title}"`);
         scheduled.status = "playing";
         this.activeTrackId = trackId;
         this.notifyListeners();
       }).catch(err => {
         console.error(`[SyncScheduler] ❌ Playback failed:`, err);
-        // Try again in a moment
-        setTimeout(() => {
-          if (this.audioElement && scheduled.status !== "playing") {
-            console.log(`[SyncScheduler] 🔄 Retrying playback...`);
-            this.audioElement.play().catch(console.error);
-          }
-        }, 50);
+        scheduled.status = "failed";
+        scheduled.error = err.message;
+        this.notifyListeners();
       });
     } else {
+      // Older browser that doesn't return a promise
       scheduled.status = "playing";
       this.activeTrackId = trackId;
       this.notifyListeners();
@@ -263,6 +229,7 @@ class SyncScheduler {
    */
   subscribe(callback: SchedulerListener): () => void {
     this.listeners.push(callback);
+    // Immediately notify with current state
     callback(Array.from(this.tracks.values()));
     
     return () => {
@@ -271,7 +238,7 @@ class SyncScheduler {
   }
 
   /**
-   * Get the audio element.
+   * Get the audio element (for UI controls to attach to).
    */
   getAudioElement(): HTMLAudioElement {
     if (!this.audioElement) {
@@ -301,9 +268,10 @@ class SyncScheduler {
       this.audioElement.src = "";
     }
 
+    // Revoke all blob URLs to free memory
     for (const track of this.tracks.values()) {
-      if (track.isBlob) {
-        URL.revokeObjectURL(track.audioUrl);
+      if (track.blobUrl) {
+        URL.revokeObjectURL(track.blobUrl);
       }
     }
 
