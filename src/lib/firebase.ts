@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, Database } from "firebase/database";
+import { getDatabase, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, get, Database } from "firebase/database";
 
 // Firebase config - your real credentials
 const firebaseConfig = {
@@ -23,4 +23,4 @@ try {
   console.error("❌ Firebase init failed:", error);
 }
 
-export { db, ref, onValue, set, push, remove, onDisconnect, serverTimestamp };
+export { db, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, get };
