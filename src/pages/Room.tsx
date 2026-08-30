@@ -460,7 +460,14 @@ const Room = () => {
         </div>
         <div className="flex items-center gap-3">
           <ConnectionStatus isConnected={isConnected} />
-          <RoomDrawer roomCode={roomCode} userName={userName} onLeave={handleLeaveRoom} />
+          <RoomDrawer 
+            roomCode={roomCode} 
+            userName={userName} 
+            isHost={isHost}
+            vetoActive={vetoActive}
+            onToggleVeto={handleToggleVeto}
+            onLeave={handleLeaveRoom} 
+          />
         </div>
       </header>
 
@@ -506,13 +513,6 @@ const Room = () => {
               onPrevious={handlePrevious}
               onToggleShuffle={() => setIsShuffle(!isShuffle)}
               onToggleMute={() => setIsMuted(!isMuted)}
-            />
-
-            {/* Veto control: host sees toggle, members see status banner */}
-            <VetoControl
-              isHost={isHost}
-              vetoActive={vetoActive}
-              onToggleVeto={handleToggleVeto}
             />
           </div>
         </div>

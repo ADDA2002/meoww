@@ -1,5 +1,5 @@
 import React from "react";
-import { Menu, Copy, Check, LogOut, X } from "lucide-react";
+import { Menu, Copy, Check, LogOut, X, ShieldAlert, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -13,10 +13,13 @@ import {
 interface RoomDrawerProps {
   roomCode: string;
   userName: string;
+  isHost: boolean;
+  vetoActive: boolean;
+  onToggleVeto: () => void;
   onLeave: () => void;
 }
 
-const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) => {
+const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, isHost, vetoActive, onToggleVeto, onLeave }) => {
   const [copied, setCopied] = React.useState(false);
   const [open, setOpen] = React.useState(false);
 
@@ -29,6 +32,10 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
   const handleLeave = () => {
     setOpen(false);
     onLeave();
+  };
+
+  const handleToggleVeto = () => {
+    onToggleVeto();
   };
 
   return (
@@ -88,6 +95,47 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({ roomCode, userName, onLeave }) 
               {userName}
             </div>
           </div>
+
+          {/* Host Controls - Veto Toggle */}
+          {isHost && (
+            <div className="space-y-2 pt-4 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                {vetoActive ? (
+                  <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                ) : (
+                  <Unlock className="w-4 h-4 text-gray-600 flex-shrink-0" />
+                )}
+                <span className="text-xs font-mono uppercase text-gray-500 tracking-wider">Member Controls</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 p-3 border border-black bg-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold uppercase tracking-wider text-black">
+                    Let others change what's playing
+                  </p>
+                  <p className="text-[11px] font-mono text-gray-600 mt-0.5">
+                    {vetoActive
+                      ? "Members are in add-only mode. They can only add songs."
+                      : "Members can skip, pause, and reorder the queue."}
+                  </p>
+                </div>
+                <button
+                  onClick={handleToggleVeto}
+                  role="switch"
+                  aria-checked={!vetoActive}
+                  aria-label="Toggle member controls"
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center transition-colors border border-black ${
+                    vetoActive ? "bg-gray-300" : "bg-black"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform bg-white border border-black transition-transform ${
+                      vetoActive ? "translate-x-1" : "translate-x-6"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Exit Button */}
           <div className="pt-4 border-t border-gray-200">
