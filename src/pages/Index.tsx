@@ -34,7 +34,7 @@ const SpinningDigit = ({ char, direction, delay }: { char: string; direction: "u
       const intervalSpeed = 150; // How fast characters change (slower)
       
       animationRef.current = setInterval(() => {
-        setDisplayChar(ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]);
+        setDisplayChar(ROOM_CODE_CHARS[Math.floor(Math.random * ROOM_CODE_CHARS.length)]);
       }, intervalSpeed);
 
       // Stop spinning and show final character
@@ -124,6 +124,11 @@ const Index = () => {
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
   const [isCheckingRoom, setIsCheckingRoom] = useState(false);
+
+  // Handle tab clicks
+  const handleTabClick = (tab: "create" | "join") => {
+    setActiveTab(tab);
+  };
 
   // Validate that the room code has the correct format
   const isValidCodeFormat = (code: string) => {
