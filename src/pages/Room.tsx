@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { 
-  Play, 
-  Pause, 
-  SkipForward, 
-  SkipBack, 
-  Shuffle, 
-  Volume2, 
+import {
+  Play,
+  Pause,
+  SkipForward,
+  SkipBack,
+  Shuffle,
+  Volume2,
   VolumeX,
-  Plus, 
-  ArrowUp, 
-  ArrowDown, 
-  Trash2, 
-  Music, 
-  Upload, 
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  Music,
+  Upload,
   Users,
   AlertCircle,
   RefreshCw,
@@ -114,10 +114,10 @@ const Room = () => {
   useEffect(() => {
     if (!roomCode) return;
 
-    const generatedId = isHost 
-      ? `host-${roomCode.toLowerCase()}` 
+    const generatedId = isHost
+      ? `host-${roomCode.toLowerCase()}`
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
-    
+
     setMyId(generatedId);
 
     const signaling = new FirebaseSignaling(roomCode, generatedId, userName, isHost);
@@ -169,7 +169,7 @@ const Room = () => {
 
     signaling.connect().then(() => {
       console.log("[Room] ✅ Signaling connected!");
-      
+
       signaling.getUsers().then((userList) => {
         console.log(`[Room] getUsers() returned:`, userList);
         if (userList.length > 0) {
@@ -211,17 +211,17 @@ const Room = () => {
         if (!isHostRef.current) {
           const audio = audioRef.current;
           if (!audio) return;
-          
+
           if (currentIndexRef.current !== msg.trackIndex) {
             setCurrentIndex(msg.trackIndex);
           }
-          
+
           const latency = (Date.now() - msg.timestamp) / 1000;
           const targetTime = msg.seekTime + latency;
           if (Math.abs(audio.currentTime - targetTime) > 0.3) {
             audio.currentTime = targetTime;
           }
-          
+
           audio.play().then(() => setIsPlaying(true)).catch(() => {});
         }
         break;
@@ -271,10 +271,10 @@ const Room = () => {
   const broadcast = (msg: SyncMessage) => {
     console.log(`[Room] Broadcasting: ${msg.type}`);
     signalingRef.current?.send(msg);
-    
+
     if (isHost) {
       const stateUpdates: Partial<FirebaseSyncState> = {};
-      
+
       if (msg.type === "PLAY") {
         stateUpdates.isPlaying = true;
         stateUpdates.currentTrackIndex = msg.trackIndex;
@@ -291,7 +291,7 @@ const Room = () => {
         stateUpdates.queue = msg.queue;
         stateUpdates.currentTrackIndex = msg.activeIndex;
       }
-      
+
       if (Object.keys(stateUpdates).length > 0) {
         signalingRef.current?.updateState(stateUpdates);
       }
@@ -325,16 +325,24 @@ const Room = () => {
     const nextIdx = isShuffle
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex + 1) % queue.length;
-    
-    setCurrentIndex(nextIdx);
+
     const audio = audioRef.current;
-    if (audio) {
+    if (!audio) return;
+
+    // 1) Pause current track first
+    audio.pause();
+    setIsPlaying(false);
+    broadcast({ type: "PAUSE", seekTime: 0 });
+
+    // 2) After a short delay, switch track and play
+    setTimeout(() => {
+      setCurrentIndex(nextIdx);
       audio.currentTime = 0;
       audio.play().then(() => {
         setIsPlaying(true);
         broadcast({ type: "PLAY", trackIndex: nextIdx, seekTime: 0, timestamp: Date.now() });
       }).catch(() => {});
-    }
+    }, 150);
   };
 
   const handlePrevious = () => {
@@ -342,16 +350,24 @@ const Room = () => {
     const prevIdx = isShuffle
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex - 1 + queue.length) % queue.length;
-    
-    setCurrentIndex(prevIdx);
+
     const audio = audioRef.current;
-    if (audio) {
+    if (!audio) return;
+
+    // 1) Pause current track first
+    audio.pause();
+    setIsPlaying(false);
+    broadcast({ type: "PAUSE", seekTime: 0 });
+
+    // 2) After a short delay, switch track and play
+    setTimeout(() => {
+      setCurrentIndex(prevIdx);
       audio.currentTime = 0;
       audio.play().then(() => {
         setIsPlaying(true);
         broadcast({ type: "PLAY", trackIndex: prevIdx, seekTime: 0, timestamp: Date.now() });
       }).catch(() => {});
-    }
+    }, 150);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -366,15 +382,23 @@ const Room = () => {
 
   const handleTrackClick = (idx: number) => {
     if (!isHost) return;
-    setCurrentIndex(idx);
     const audio = audioRef.current;
-    if (audio) {
+    if (!audio) return;
+
+    // 1) Pause first
+    audio.pause();
+    setIsPlaying(false);
+    broadcast({ type: "PAUSE", seekTime: 0 });
+
+    // 2) Then switch and play
+    setTimeout(() => {
+      setCurrentIndex(idx);
       audio.currentTime = 0;
       audio.play().then(() => {
         setIsPlaying(true);
         broadcast({ type: "PLAY", trackIndex: idx, seekTime: 0, timestamp: Date.now() });
       }).catch(() => {});
-    }
+    }, 150);
   };
 
   // Queue management
@@ -452,7 +476,7 @@ const Room = () => {
     let newActive = currentIndex;
     if (idx < currentIndex) newActive = currentIndex - 1;
     else if (idx === currentIndex) newActive = Math.min(currentIndex, newQueue.length - 1);
-    
+
     setQueue(newQueue);
     setCurrentIndex(newActive);
     broadcast({ type: "UPDATE_QUEUE", queue: newQueue, activeIndex: newActive });
