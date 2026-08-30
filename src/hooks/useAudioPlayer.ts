@@ -33,6 +33,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
 
     audio.addEventListener("loadedmetadata", () => {
       setDuration(audio.duration);
+      setIsLoaded(true);
     });
 
     audio.addEventListener("canplay", () => {
@@ -65,7 +66,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
       audio.pause();
       audio.src = "";
     };
-  }, [isHost]);
+  }, []);
 
   // Update track source when track changes
   useEffect(() => {
@@ -88,18 +89,16 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     }
   }, [isMuted]);
 
-  // Stable play function - no dependencies to prevent re-renders triggering it
   const play = useCallback(async () => {
     const audio = audioRef.current;
     if (!audio) return;
 
     try {
-      // Check audio's ready state directly from the element, not from React state
-      // This prevents the play function from getting new references when isLoaded changes
-      if (audio.readyState < 3) {
+      // Wait for audio to be ready if not loaded
+      if (!isLoaded) {
         await new Promise<void>((resolve) => {
           const checkLoaded = () => {
-            if (audio.readyState >= 3) {
+            if (audio.readyState >= 3) { // HAVE_FUTURE_DATA
               resolve();
             } else {
               setTimeout(checkLoaded, 50);
@@ -115,7 +114,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
       console.error("Play failed:", err);
       setIsPlaying(false);
     }
-  }, []); // Empty dependencies - stable reference
+  }, [isLoaded]);
 
   const pause = useCallback(() => {
     const audio = audioRef.current;
