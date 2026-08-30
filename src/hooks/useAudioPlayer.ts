@@ -10,11 +10,11 @@ interface UseAudioPlayerOptions {
 
 export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: UseAudioPlayerOptions) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const isLoadedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [isLoaded, setIsLoaded] = useState(false);
 
   const onTrackEndedRef = useRef(onTrackEnded);
   onTrackEndedRef.current = onTrackEnded;
@@ -24,47 +24,64 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     const audio = new Audio();
     audioRef.current = audio;
 
-    audio.addEventListener("timeupdate", () => {
+    const handleTimeUpdate = () => {
       setCurrentTime(audio.currentTime);
       if (isHost) {
         onTimeUpdate?.(audio.currentTime);
       }
-    });
+    };
 
-    audio.addEventListener("loadedmetadata", () => {
+    const handleLoadedMetadata = () => {
       setDuration(audio.duration);
-      setIsLoaded(true);
-    });
+      isLoadedRef.current = true;
+    };
 
-    audio.addEventListener("canplay", () => {
-      setIsLoaded(true);
-    });
+    const handleCanPlay = () => {
+      isLoadedRef.current = true;
+    };
 
-    audio.addEventListener("waiting", () => {
-      setIsLoaded(false);
-    });
+    const handleWaiting = () => {
+      isLoadedRef.current = false;
+    };
 
-    audio.addEventListener("pause", () => {
+    const handlePause = () => {
       setIsPlaying(false);
-    });
+    };
 
-    audio.addEventListener("play", () => {
+    const handlePlay = () => {
       setIsPlaying(true);
-    });
+    };
 
-    audio.addEventListener("ended", () => {
+    const handleEnded = () => {
       setIsPlaying(false);
       onTrackEndedRef.current?.();
-    });
+    };
 
-    audio.addEventListener("error", (e) => {
+    const handleError = (e: Event) => {
       console.error("Audio error:", e);
-      setIsLoaded(false);
-    });
+      isLoadedRef.current = false;
+    };
+
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("canplay", handleCanPlay);
+    audio.addEventListener("waiting", handleWaiting);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
 
     return () => {
       audio.pause();
       audio.src = "";
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("canplay", handleCanPlay);
+      audio.removeEventListener("waiting", handleWaiting);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
     };
   }, []);
 
@@ -74,7 +91,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     if (!audio || !track) return;
 
     // Reset state for new track
-    setIsLoaded(false);
+    isLoadedRef.current = false;
     setCurrentTime(0);
     setDuration(0);
 
@@ -94,11 +111,16 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
     if (!audio) return;
 
     try {
-      // Wait for audio to be ready if not loaded
-      if (!isLoaded) {
-        await new Promise<void>((resolve) => {
+      // Wait for audio to be ready using ref (not stale state)
+      if (!isLoadedRef.current) {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("Timeout waiting for audio to load"));
+          }, 10000);
+
           const checkLoaded = () => {
-            if (audio.readyState >= 3) { // HAVE_FUTURE_DATA
+            if (isLoadedRef.current) {
+              clearTimeout(timeout);
               resolve();
             } else {
               setTimeout(checkLoaded, 50);
@@ -114,7 +136,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
       console.error("Play failed:", err);
       setIsPlaying(false);
     }
-  }, [isLoaded]);
+  }, []);
 
   const pause = useCallback(() => {
     const audio = audioRef.current;
@@ -137,7 +159,7 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate, onTrackEnded }: Us
   return {
     isPlaying,
     isMuted,
-    isLoaded,
+    isLoaded: isLoadedRef.current,
     setIsMuted,
     currentTime,
     duration,
