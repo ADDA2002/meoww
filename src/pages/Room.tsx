@@ -140,34 +140,8 @@ const Room = () => {
         setUsers((prev) => prev.map((u) => ({ ...u, isHost: u.id === msg.newHostId })));
         break;
       }
-      case "REQUEST_SYNC": {
-        // Host receives sync request from a new user
-        if (isHostRef.current) {
-          // Send queue first, then play state (so listener has correct track loaded)
-          broadcast({
-            type: "UPDATE_QUEUE",
-            queue: queueRef.current,
-            activeIndex: currentIndexRef.current,
-          });
-          // Then send current playback state
-          if (isPlaying) {
-            broadcast({
-              type: "PLAY",
-              trackIndex: currentIndexRef.current,
-              seekTime: getCurrentTime(),
-              timestamp: Date.now(),
-            });
-          } else {
-            broadcast({
-              type: "PAUSE",
-              seekTime: getCurrentTime(),
-            });
-          }
-        }
-        break;
-      }
     }
-  }, [myId, play, pause, seek, broadcast, getCurrentTime, isPlaying]);
+  }, [myId, play, pause, seek]);
 
   // Firebase sync hook
   const { isConnected, broadcast, getUsers } = useFirebaseSync({
@@ -202,18 +176,6 @@ const Room = () => {
       }
     });
   }, [isConnected, myId, getUsers]);
-
-  // New user requests sync from host once connected
-  useEffect(() => {
-    if (!isConnected || !myId || isHost) return;
-    
-    // Wait a moment for connection to stabilize, then request sync
-    const syncTimeout = setTimeout(() => {
-      broadcast({ type: "REQUEST_SYNC", requesterId: myId });
-    }, 500);
-    
-    return () => clearTimeout(syncTimeout);
-  }, [isConnected, myId, isHost, broadcast]);
 
   // Playback controls - now using refs to avoid stale closures
   const playRef = useRef(play);
