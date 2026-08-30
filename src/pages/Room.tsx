@@ -11,6 +11,9 @@ import { formatTime } from "@/lib/utils";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
 
+const SYNC_TICK_MS = 3000; // host re-broadcasts currentTime every 3s
+const RESYNC_THRESHOLD_SEC = 0.25; // member re-seeks if drift exceeds 250ms
+
 const Room = () => {
   const { code } = useParams<{ code: string }>();
   const [searchParams] = useSearchParams();
@@ -36,13 +39,16 @@ const Room = () => {
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
+  const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
+  const isHostRef = useRef(isHost);
+  const lastSyncStateRef = useRef<FirebaseSyncState | null>(null);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
   isShuffleRef.current = isShuffle;
+  isHostRef.current = isHost;
 
   const currentTrack = queue[currentIndex] || null;
-  const updatePlaybackStateRef = useRef<((updates: Partial<FirebaseSyncState>) => void) | null>(null);
 
   // Play a track from the beginning — used for next/prev buttons and auto-play
   const playTrack = useCallback((idx: number) => {
@@ -71,12 +77,15 @@ const Room = () => {
       currentTrackIndex: idx,
       queue: queueRef.current,
       isPlaying: true,
+      currentTime: 0,
     });
   }, []);
 
   // Handle state changes from Firebase (for members receiving host updates)
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
-    if (isHost) return;
+    lastSyncStateRef.current = state;
+
+    if (isHostRef.current) return;
 
     const newIndex = state.currentTrackIndex ?? 0;
     const newQueue = state.queue || [];
@@ -89,21 +98,50 @@ const Room = () => {
     if (!audio) return;
 
     const track = newQueue[newIndex];
-    if (track) {
-      if (audio.src !== track.url) {
-        audio.src = track.url;
-        audio.load();
-      }
+    const targetTime = state.currentTime ?? 0;
+    const wasPaused = audio.paused;
+    const indexChanged = newIndex !== currentIndexRef.current;
+    const urlChanged = track && audio.src !== track.url;
 
-      if (state.isPlaying) {
-        audio.play().catch(console.error);
-      } else {
-        audio.pause();
-      }
+    // Compute expected playback time adjusted for network delay
+    const expectedNow = state.isPlaying
+      ? targetTime + (Date.now() - (state.currentTimeUpdatedAt || Date.now())) / 1000
+      : targetTime;
+
+    if (urlChanged || indexChanged) {
+      setCurrentIndex(newIndex);
+      setCurrentTime(expectedNow);
+      audio.src = track.url;
+      audio.load();
+
+      const handleCanPlay = () => {
+        audio.removeEventListener("canplay", handleCanPlay);
+        // Only correct if drift is significant
+        if (Math.abs(audio.currentTime - expectedNow) > 0.05) {
+          audio.currentTime = expectedNow;
+        }
+        if (state.isPlaying) {
+          audio.play().catch(console.error);
+        } else {
+          audio.pause();
+        }
+      };
+      audio.addEventListener("canplay", handleCanPlay);
+      return;
     }
 
-    setCurrentIndex(newIndex);
-  }, [isHost]);
+    // Same track — re-sync position if drift is too large
+    if (Math.abs(audio.currentTime - expectedNow) > RESYNC_THRESHOLD_SEC) {
+      audio.currentTime = expectedNow;
+      setCurrentTime(expectedNow);
+    }
+
+    if (state.isPlaying && wasPaused) {
+      audio.play().catch(console.error);
+    } else if (!state.isPlaying && !wasPaused) {
+      audio.pause();
+    }
+  }, []);
 
   const handleIncomingMessage = useCallback((_msg: SyncMessage) => {
   }, []);
@@ -183,6 +221,41 @@ const Room = () => {
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
+  // Host: continuously re-broadcast the current playback position so members
+  // can correct drift and stay in sync. Members also re-check their position
+  // periodically against the latest known state to fix any accumulated drift.
+  useEffect(() => {
+    if (!isHost) {
+      // Member side: periodically correct drift
+      const interval = setInterval(() => {
+        const audio = audioRef.current;
+        const state = lastSyncStateRef.current;
+        if (!audio || !state || !state.isPlaying) return;
+        const expectedNow =
+          (state.currentTime ?? 0) +
+          (Date.now() - (state.currentTimeUpdatedAt || Date.now())) / 1000;
+        if (Math.abs(audio.currentTime - expectedNow) > RESYNC_THRESHOLD_SEC) {
+          audio.currentTime = expectedNow;
+          setCurrentTime(expectedNow);
+        }
+      }, 1500);
+      return () => clearInterval(interval);
+    }
+
+    // Host side: re-broadcast position every SYNC_TICK_MS
+    const interval = setInterval(() => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      updatePlaybackStateRef.current?.({
+        currentTrackIndex: currentIndexRef.current,
+        queue: queueRef.current,
+        isPlaying: !audio.paused,
+        currentTime: audio.currentTime,
+      });
+    }, SYNC_TICK_MS);
+    return () => clearInterval(interval);
+  }, [isHost]);
+
   // Toggle play/pause
   const handleTogglePlay = useCallback(() => {
     const audio = audioRef.current;
@@ -190,10 +263,10 @@ const Room = () => {
 
     if (!audio.paused) {
       audio.pause();
-      updatePlaybackStateRef.current?.({ isPlaying: false });
+      updatePlaybackStateRef.current?.({ isPlaying: false, currentTime: audio.currentTime });
     } else {
       audio.play().catch(console.error);
-      updatePlaybackStateRef.current?.({ isPlaying: true });
+      updatePlaybackStateRef.current?.({ isPlaying: true, currentTime: audio.currentTime });
     }
   }, []);
 
@@ -222,9 +295,10 @@ const Room = () => {
   // Seek the audio
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (audioRef.current) {
-      audioRef.current.currentTime = parseFloat(e.target.value);
-      setCurrentTime(parseFloat(e.target.value));
-      updatePlaybackStateRef.current?.({ currentTime: parseFloat(e.target.value) });
+      const t = parseFloat(e.target.value);
+      audioRef.current.currentTime = t;
+      setCurrentTime(t);
+      updatePlaybackStateRef.current?.({ currentTime: t, isPlaying: !audioRef.current.paused });
     }
   }, []);
 

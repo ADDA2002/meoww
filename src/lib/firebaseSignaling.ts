@@ -7,6 +7,7 @@ export interface FirebaseSyncState {
   currentTrackIndex: number;
   isPlaying: boolean;
   currentTime: number;
+  currentTimeUpdatedAt: number;
   queue: Track[];
   lastUpdateId: string;
   lastUpdated: number;
@@ -86,6 +87,7 @@ class FirebaseSignaling {
               currentTrackIndex: 0,
               isPlaying: false,
               currentTime: 0,
+              currentTimeUpdatedAt: Date.now(),
               queue: [],
               lastUpdateId: `init-${Date.now()}`,
               lastUpdated: Date.now()
@@ -150,7 +152,7 @@ class FirebaseSignaling {
           return;
         }
         this.lastProcessedUpdateId = state.lastUpdateId || "";
-        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex);
+        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex, "t:", state.currentTime);
         this.notifyStateChange(state);
       }
     }, (error: any) => {
@@ -215,6 +217,7 @@ class FirebaseSignaling {
       ...updates,
       roomCode: this.roomCode,
       hostId: this.isHost ? this.myId : undefined,
+      currentTimeUpdatedAt: Date.now(),
       lastUpdateId: updateId,
       lastUpdated: Date.now()
     });
