@@ -75,13 +75,6 @@ const Room = () => {
   // This is the foundation for our sync improvements.
   const audioCtxRef = useRef<AudioContext | null>(null);
   
-  // ============= MediaElementAudioSourceNode =============
-  // Connects the <audio> element to the AudioContext graph.
-  // This lets us route audio through Web Audio API and access the exact
-  // playback position via the audio hardware clock.
-  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const isAudioWiredRef = useRef<boolean>(false);
-  
   // Refs that track state for use in closures
   const usersRef = useRef<RoomUser[]>([]);
   const queueRef = useRef<Track[]>(queue);
@@ -101,7 +94,6 @@ const Room = () => {
   // ============= EFFECTS =============
 
   // Initialize AudioContext on first user interaction (browser autoplay policy)
-  // and wire the <audio> element to it via MediaElementAudioSourceNode
   useEffect(() => {
     const initAudioContext = () => {
       if (!audioCtxRef.current) {
@@ -113,21 +105,6 @@ const Room = () => {
         }
       } else if (audioCtxRef.current.state === "suspended") {
         audioCtxRef.current.resume();
-      }
-
-      // Wire the <audio> element to the AudioContext graph
-      if (audioRef.current && audioCtxRef.current && !isAudioWiredRef.current) {
-        try {
-          mediaSourceRef.current = audioCtxRef.current.createMediaElementSource(audioRef.current);
-          // Connect to destination so audio is still audible
-          mediaSourceRef.current.connect(audioCtxRef.current.destination);
-          isAudioWiredRef.current = true;
-          console.log("[MediaElementAudioSourceNode] Audio element wired to AudioContext");
-          console.log("[MediaElementAudioSourceNode] Channel count:", mediaSourceRef.current.channelCount);
-        } catch (e) {
-          // createMediaElementSource can throw if called twice on same element
-          console.warn("[MediaElementAudioSourceNode] Already wired or error:", e);
-        }
       }
     };
 
