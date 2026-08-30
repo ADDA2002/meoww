@@ -78,6 +78,7 @@ const Room = () => {
   const currentIndexRef = useRef<number>(currentIndex);
   const currentTimeRef = useRef<number>(currentTime);
   const isPlayingRef = useRef<boolean>(isPlaying);
+  const hasAutoPlayed = useRef<boolean>(false);
 
   // Keep refs updated
   usersRef.current = users;
@@ -109,6 +110,34 @@ const Room = () => {
 
     return () => clearInterval(interval);
   }, []);
+
+  // Auto-play when room loads for host (handles browser autoplay policy)
+  useEffect(() => {
+    if (isHost && isConnected && !hasAutoPlayed.current && audioRef.current && currentTrack) {
+      hasAutoPlayed.current = true;
+      
+      // Small delay to ensure audio element is ready
+      const timer = setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.play()
+            .then(() => {
+              setIsPlaying(true);
+              broadcast({
+                type: "PLAY",
+                trackIndex: currentIndex,
+                seekTime: 0,
+                timestamp: Date.now(),
+              });
+            })
+            .catch((err) => {
+              console.log("Auto-play was prevented by browser policy. User needs to click play.");
+            });
+        }
+      }, 300);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isHost, isConnected, currentTrack]);
 
   // Initialize Firebase signaling
   useEffect(() => {
