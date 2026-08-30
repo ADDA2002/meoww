@@ -26,11 +26,14 @@ class FirebaseSignaling {
   private myName: string;
   private isHost: boolean;
   private listeners: ((msg: SyncMessage) => void)[] = [];
-  private stateListener: ((state: FirebaseSyncState) => void)[] = [];
+  private stateListener: ((state: FirebaseSyncState | null) => void)[] = [];
   private connectionStateListener: ((connected: boolean) => void)[] = [];
+  private sessionEndedListener: (() => void)[] = [];
   private userRef: any = null;
   private stateRef: any = null;
+  private roomRef: any = null;
   private connected: boolean = false;
+  private isDestroyed: boolean = false;
 
   constructor(roomCode: string, myId: string, myName: string, isHost: boolean) {
     this.roomCode = roomCode.toLowerCase();
@@ -53,6 +56,7 @@ class FirebaseSignaling {
       }
 
       try {
+        this.roomRef = ref(db, `rooms/${this.roomCode}`);
         this.userRef = ref(db, `rooms/${this.roomCode}/users/${this.myId}`);
         this.stateRef = ref(db, `rooms/${this.roomCode}/state`);
 
@@ -65,10 +69,20 @@ class FirebaseSignaling {
         };
 
         console.log(`[FirebaseSignaling] Writing my presence to ${this.userRef.toString()}`);
+        
+        // Set up onDisconnect BEFORE writing to ensure it registers
+        if (this.isHost) {
+          // Host: room exists as long as host is connected
+          onDisconnect(this.userRef).remove();
+          onDisconnect(this.stateRef).remove();
+          onDisconnect(this.roomRef).remove();
+        } else {
+          // Non-host: just remove their presence
+          onDisconnect(this.userRef).remove();
+        }
+
         set(this.userRef, userData).then(() => {
           console.log(`[FirebaseSignaling] ✅ My presence written`);
-          onDisconnect(this.userRef).remove();
-
           this.connected = true;
           this.notifyConnectionState(true);
 
@@ -76,11 +90,35 @@ class FirebaseSignaling {
           console.log(`[FirebaseSignaling] Broadcasting initial users...`);
           this.broadcastInitialUsers();
 
+          // Subscribe to room deletion (for non-host users - detects when host leaves)
+          if (!this.isHost) {
+            console.log(`[FirebaseSignaling] Setting up room deletion listener for non-host...`);
+            onValue(this.roomRef, (snapshot: any) => {
+              if (!snapshot.exists() && !this.isDestroyed) {
+                console.log(`[FirebaseSignaling] 🔔 Room deleted (host left), notifying session ended`);
+                this.notifySessionEnded();
+              }
+            }, (error: any) => {
+              console.error(`[FirebaseSignaling] ❌ onValue room error:`, error);
+            });
+          }
+
           // Subscribe to user list changes
           console.log(`[FirebaseSignaling] Setting up onValue for users...`);
           onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
             const usersData = snapshot.val();
             console.log(`[FirebaseSignaling] 🔔 onValue users fired, data:`, usersData);
+            
+            // Check if host is still in the room
+            if (!this.isHost && usersData) {
+              const hostStillPresent = Object.values(usersData).some((u: any) => u.isHost === true);
+              if (!hostStillPresent) {
+                console.log(`[FirebaseSignaling] 🔔 Host no longer present, room should end`);
+                this.notifySessionEnded();
+                return;
+              }
+            }
+            
             if (usersData) {
               const users: RoomUser[] = Object.values(usersData);
               console.log(`[FirebaseSignaling] → Notifying USER_LIST:`, users.map(u => u.name));
@@ -206,7 +244,7 @@ class FirebaseSignaling {
   }
 
   updateState(updates: Partial<FirebaseSyncState>) {
-    if (!db || !this.stateRef || !this.isHost) return;
+    if (!db || !this.stateRef) return;
 
     set(this.stateRef, {
       ...updates,
@@ -222,12 +260,17 @@ class FirebaseSignaling {
     this.listeners.push(callback);
   }
 
-  onStateChange(callback: (state: FirebaseSyncState) => void) {
+  onStateChange(callback: (state: FirebaseSyncState | null) => void) {
     this.stateListener.push(callback);
   }
 
   onConnectionChange(callback: (connected: boolean) => void) {
     this.connectionStateListener.push(callback);
+  }
+
+  onSessionEnded(callback: () => void) {
+    console.log(`[FirebaseSignaling] onSessionEnded registered`);
+    this.sessionEndedListener.push(callback);
   }
 
   private notifyMessage(msg: SyncMessage) {
@@ -238,7 +281,7 @@ class FirebaseSignaling {
     });
   }
 
-  private notifyStateChange(state: FirebaseSyncState) {
+  private notifyStateChange(state: FirebaseSyncState | null) {
     this.stateListener.forEach(cb => cb(state));
   }
 
@@ -246,25 +289,56 @@ class FirebaseSignaling {
     this.connectionStateListener.forEach(cb => cb(connected));
   }
 
+  private notifySessionEnded() {
+    console.log(`[FirebaseSignaling] notifySessionEnded called, listeners: ${this.sessionEndedListener.length}`);
+    this.isDestroyed = true;
+    this.connected = false;
+    this.notifyConnectionState(false);
+    this.sessionEndedListener.forEach((cb, i) => {
+      console.log(`[FirebaseSignaling] → Calling session ended listener ${i}`);
+      cb();
+    });
+  }
+
   disconnect() {
+    console.log(`[FirebaseSignaling] disconnect() called by ${this.myId} (host=${this.isHost})`);
+    
+    if (this.isDestroyed) {
+      console.log(`[FirebaseSignaling] Already destroyed, skipping`);
+      return;
+    }
+
     if (!db) return;
 
+    // Remove own user presence
     if (this.userRef) {
       remove(this.userRef).catch(() => {});
     }
 
+    // If host disconnects, remove the entire room (this will trigger session ended for others)
     if (this.isHost) {
-      onValue(ref(db, `rooms/${this.roomCode}/users`), (snapshot: any) => {
-        const users = snapshot.val();
-        if (!users || Object.keys(users).length <= 1) {
-          remove(ref(db, `rooms/${this.roomCode}`)).catch(() => {});
+      console.log(`[FirebaseSignaling] Host leaving, removing entire room`);
+      remove(this.roomRef).catch(() => {});
+      this.notifySessionEnded();
+    } else {
+      // For non-host, just wait for onDisconnect to clean up
+      // Check if host is still present
+      console.log(`[FirebaseSignaling] Non-host leaving, checking if host remains`);
+      get(ref(db, `rooms/${this.roomCode}/users`)).then((snapshot: any) => {
+        const usersData = snapshot.val();
+        if (usersData) {
+          const hostPresent = Object.values(usersData).some((u: any) => u.isHost === true && u.id !== this.myId);
+          if (!hostPresent) {
+            console.log(`[FirebaseSignaling] Host no longer present after non-host disconnect`);
+            this.notifySessionEnded();
+          }
         }
-      }, { onlyOnce: true } as any);
+      }).catch(() => {});
     }
   }
 
   isConnected(): boolean {
-    return this.connected;
+    return this.connected && !this.isDestroyed;
   }
 
   async getUsers(): Promise<RoomUser[]> {

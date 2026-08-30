@@ -11,6 +11,7 @@ interface UseFirebaseSyncOptions {
   currentIndex: number;
   isPlaying: boolean;
   onMessage: (msg: SyncMessage) => void;
+  onSessionEnded?: () => void;
 }
 
 export function useFirebaseSync({
@@ -22,6 +23,7 @@ export function useFirebaseSync({
   currentIndex,
   isPlaying,
   onMessage,
+  onSessionEnded,
 }: UseFirebaseSyncOptions) {
   const signalingRef = useRef<FirebaseSignaling | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -41,6 +43,10 @@ export function useFirebaseSync({
 
     signaling.onMessage(onMessage);
     signaling.onConnectionChange(setIsConnected);
+
+    if (onSessionEnded) {
+      signaling.onSessionEnded(onSessionEnded);
+    }
 
     signaling.connect();
 

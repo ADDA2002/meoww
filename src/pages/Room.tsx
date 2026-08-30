@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { Track, RoomUser, SyncMessage } from "@/types/music";
 import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
+import { Button } from "@/components/ui/button";
+import { Radio } from "lucide-react";
 
 import RoomDrawer from "@/components/RoomDrawer";
 import { PlayerControls } from "@/components/PlayerControls";
@@ -12,7 +14,6 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { QueueList } from "@/components/QueueList";
 import { UserList } from "@/components/UserList";
 import { ConnectionStatus, OfflineBanner } from "@/components/ConnectionStatus";
-import { HostStatusBanner } from "@/components/HostStatusBanner";
 
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
@@ -37,12 +38,15 @@ const Room = () => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
 
+  // Session state
+  const [sessionEnded, setSessionEnded] = useState<boolean>(false);
+
   // Sync refs
   const currentIndexRef = useRef(currentIndex);
   const queueRef = useRef(queue);
   const isShuffleRef = useRef(isShuffle);
   const isInitialMount = useRef(true);
-  const isReorderingRef = useRef(false); // Track if we're reordering to prevent auto-play
+  const isReorderingRef = useRef(false);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -84,19 +88,16 @@ const Room = () => {
   useEffect(() => {
     if (!currentTrack) return;
     
-    // Don't auto-play on initial mount
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
     
-    // Don't auto-play if we're just reordering the queue
     if (isReorderingRef.current) {
       isReorderingRef.current = false;
       return;
     }
     
-    // Try to play whenever currentIndex changes (skip, previous, auto-advance)
     play().catch((err) => {
       console.warn("Auto-play after track change failed:", err);
     });
@@ -129,7 +130,7 @@ const Room = () => {
         break;
       }
       case "UPDATE_QUEUE": {
-        isReorderingRef.current = true; // Mark as reorder to prevent auto-play
+        isReorderingRef.current = true;
         setQueue(msg.queue);
         if (msg.activeIndex !== undefined) {
           setCurrentIndex(msg.activeIndex);
@@ -149,6 +150,12 @@ const Room = () => {
     }
   }, [myId, play, pause, seek]);
 
+  // Handle session ended
+  const handleSessionEnded = useCallback(() => {
+    console.log("Session ended - host left");
+    setSessionEnded(true);
+  }, []);
+
   // Firebase sync hook
   const { isConnected, broadcast, getUsers } = useFirebaseSync({
     roomCode,
@@ -159,6 +166,7 @@ const Room = () => {
     currentIndex,
     isPlaying,
     onMessage: handleIncomingMessage,
+    onSessionEnded: handleSessionEnded,
   });
 
   // Initialize connection
@@ -183,7 +191,7 @@ const Room = () => {
     });
   }, [isConnected, myId, getUsers]);
 
-  // Playback controls - now using refs to avoid stale closures
+  // Playback controls
   const playRef = useRef(play);
   const pauseRef = useRef(pause);
   const seekRef = useRef(seek);
@@ -216,14 +224,10 @@ const Room = () => {
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex + 1) % queue.length;
 
-    // Update index first (this triggers audio element to load new track)
     setCurrentIndex(nextIdx);
-    
-    // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
-    // Play when ready
     setTimeout(() => {
       seekRef.current(0);
       playRef.current();
@@ -238,14 +242,10 @@ const Room = () => {
       ? Math.floor(Math.random() * queue.length)
       : (currentIndex - 1 + queue.length) % queue.length;
 
-    // Update index first
     setCurrentIndex(prevIdx);
-    
-    // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
-    // Play when ready
     setTimeout(() => {
       seekRef.current(0);
       playRef.current();
@@ -254,14 +254,10 @@ const Room = () => {
   }, [queue.length, isShuffle, currentIndex]);
 
   const handleTrackClick = useCallback((idx: number) => {
-    // Update index first
     setCurrentIndex(idx);
-    
-    // Pause and broadcast
     pauseRef.current();
     broadcastRef.current({ type: "PAUSE", seekTime: 0 });
     
-    // Play when ready
     setTimeout(() => {
       seekRef.current(0);
       playRef.current();
@@ -314,7 +310,6 @@ const Room = () => {
     if (currentIndex === idx) newActive = targetIdx;
     else if (currentIndex === targetIdx) newActive = idx;
 
-    // Mark as reordering to prevent auto-play
     isReorderingRef.current = true;
     
     setQueue(newQueue);
@@ -352,6 +347,46 @@ const Room = () => {
   const handleRetry = () => {
     window.location.reload();
   };
+
+  const handleGoHome = () => {
+    navigate("/");
+  };
+
+  // Session Ended Screen
+  if (sessionEnded) {
+    return (
+      <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center p-6">
+        <div className="max-w-md text-center space-y-6">
+          <div className="w-20 h-20 mx-auto bg-gray-100 border-2 border-black flex items-center justify-center">
+            <Radio className="w-10 h-10 text-gray-400" />
+          </div>
+          
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold tracking-tight uppercase">Session Ended</h1>
+            <p className="text-gray-600 font-mono text-sm">
+              The host has left the session. The Jam cannot exist without the host.
+            </p>
+          </div>
+
+          <div className="border border-gray-200 bg-gray-50 p-4 text-left space-y-2">
+            <p className="text-xs font-mono uppercase text-gray-500">What happened?</p>
+            <ul className="text-sm text-gray-700 space-y-1">
+              <li>• The host closed their app or left</li>
+              <li>• The session is now terminated for everyone</li>
+              <li>• Members cannot keep a hostless room alive</li>
+            </ul>
+          </div>
+
+          <Button
+            onClick={handleGoHome}
+            className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-3 text-sm uppercase tracking-wider"
+          >
+            Return to Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
@@ -408,8 +443,6 @@ const Room = () => {
               onToggleShuffle={() => setIsShuffle(!isShuffle)}
               onToggleMute={() => setIsMuted(!isMuted)}
             />
-
-            <HostStatusBanner isHost={isHost} />
           </div>
         </div>
 
