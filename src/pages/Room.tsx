@@ -487,19 +487,12 @@ const Room = () => {
     }
   };
 
-  // Play a specific track from a given seek time, ensuring audio is loaded
+  // Core play function - ensures audio is actually playing
   const playAudio = (trackIndex: number, seekTime: number) => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    // Update index so the audio src attribute updates on next render
-    setCurrentIndex(trackIndex);
-    currentIndexRef.current = trackIndex;
-
-    const targetUrl = queueRef.current[trackIndex]?.url;
-    if (!targetUrl) return;
-
-    const startPlayback = () => {
+    const attemptPlay = () => {
       audio.currentTime = seekTime;
       const playPromise = audio.play();
       if (playPromise !== undefined) {
@@ -514,6 +507,7 @@ const Room = () => {
           });
         }).catch((err) => {
           console.log("Play attempt failed, retrying:", err);
+          // Retry after a short delay
           setTimeout(() => {
             audio.play().then(() => {
               setIsPlaying(true);
@@ -530,20 +524,14 @@ const Room = () => {
       }
     };
 
-    // Wait for the new src to be ready, then play
-    const onCanPlay = () => {
-      audio.removeEventListener("canplay", onCanPlay);
-      startPlayback();
-    };
-
-    if (audio.src !== targetUrl) {
-      audio.addEventListener("canplay", onCanPlay);
-      audio.src = targetUrl;
-      audio.load();
-    } else if (audio.readyState >= 2) {
-      startPlayback();
+    if (audio.readyState >= 2) {
+      attemptPlay();
     } else {
-      audio.addEventListener("canplay", onCanPlay);
+      const onLoaded = () => {
+        audio.removeEventListener("loadeddata", onLoaded);
+        attemptPlay();
+      };
+      audio.addEventListener("loadeddata", onLoaded);
       audio.load();
     }
   };
@@ -570,6 +558,7 @@ const Room = () => {
     if (queue.length === 0) return;
     let nextIdx = 0;
     if (isShuffle) {
+      // Pick a random index different from current
       if (queue.length > 1) {
         do {
           nextIdx = Math.floor(Math.random() * queue.length);
@@ -580,6 +569,8 @@ const Room = () => {
     } else {
       nextIdx = (currentIndex + 1) % queue.length;
     }
+    setCurrentIndex(nextIdx);
+    // Play the new track from the beginning
     playAudio(nextIdx, 0);
   };
 
@@ -587,6 +578,7 @@ const Room = () => {
     if (queue.length === 0) return;
     let prevIdx = 0;
     if (isShuffle) {
+      // Pick a random index different from current
       if (queue.length > 1) {
         do {
           prevIdx = Math.floor(Math.random() * queue.length);
@@ -597,6 +589,8 @@ const Room = () => {
     } else {
       prevIdx = (currentIndex - 1 + queue.length) % queue.length;
     }
+    setCurrentIndex(prevIdx);
+    // Play the previous track from the beginning
     playAudio(prevIdx, 0);
   };
 
