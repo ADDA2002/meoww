@@ -227,10 +227,10 @@ const Index = () => {
                     <div className="relative">
                       <Input id="join-code" value={joinCode} onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setJoinError(null); }}
                         placeholder="" maxLength={6}
-                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-[0.5em] placeholder-gray-400 focus:border-black font-semibold text-lg pl-4 pr-12" />
+                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-[0.5em] placeholder-gray-400 focus:border-black text-lg pl-4 pr-12" />
                       {!joinCode && (
                         <div className="absolute inset-0 flex items-center pl-4 pointer-events-none overflow-hidden">
-                          <span className="text-gray-400 font-mono tracking-[0.5em] text-lg font-semibold">
+                          <span className="text-gray-400 font-mono tracking-[0.5em] text-lg">
                             <CyclingCodePlaceholder />
                           </span>
                         </div>
