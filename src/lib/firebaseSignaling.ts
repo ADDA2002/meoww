@@ -9,6 +9,8 @@ export interface FirebaseSyncState {
   currentTime: number;
   queue: Track[];
   vetoActive?: boolean;
+  // Phase 2: The synced target time when playback should start
+  targetSyncedTime?: number;
   lastUpdateId: string; // Unique ID for each state update to prevent loops
   lastUpdated: number;
 }
@@ -154,12 +156,11 @@ class FirebaseSignaling {
     const stateUnsub = onValue(this.stateRef, (snapshot: any) => {
       const state = snapshot.val();
       if (state) {
-        // Skip if we've already processed this update (prevents loops)
         if (state.lastUpdateId === this.lastProcessedUpdateId) {
           return;
         }
         this.lastProcessedUpdateId = state.lastUpdateId || "";
-        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex);
+        console.log(`[FirebaseSignaling] 🔔 State update:`, state.lastUpdateId, "isPlaying:", state.isPlaying, "trackIdx:", state.currentTrackIndex, "targetTime:", state.targetSyncedTime);
         this.notifyStateChange(state);
       }
     }, (error: any) => {
@@ -167,12 +168,11 @@ class FirebaseSignaling {
     });
     this.unsubscribers.push(() => stateUnsub());
 
-    // Listen for instant action messages (veto, kick, ban, etc.)
+    // Listen for instant action messages (kick, ban, etc.)
     const messagesUnsub = onValue(ref(db, `rooms/${this.roomCode}/messages`), (snapshot: any) => {
       const messages = snapshot.val();
       if (messages) {
         Object.values(messages).forEach((msg: any) => {
-          // Only process messages from other users
           if (msg.senderId !== this.myId) {
             const { senderId, senderName, timestamp, ...syncMsg } = msg;
             this.notifyMessage(syncMsg as SyncMessage);
@@ -217,7 +217,6 @@ class FirebaseSignaling {
     });
   }
 
-  // Send instant action message (veto toggle, kick, ban)
   send(msg: SyncMessage) {
     if (!db) return;
 
@@ -228,13 +227,11 @@ class FirebaseSignaling {
       timestamp: serverTimestamp()
     });
 
-    // Clean up message after 30 seconds
     setTimeout(() => {
       if (msgRef) remove(msgRef).catch(() => {});
     }, 30000);
   }
 
-  // Update room state (PRIMARY sync mechanism for playback)
   updateState(updates: Partial<FirebaseSyncState>) {
     if (!db || !this.stateRef) return;
 

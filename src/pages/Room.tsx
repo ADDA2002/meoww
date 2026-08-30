@@ -14,10 +14,13 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { QueueList } from "@/components/QueueList";
 import { UserList } from "@/components/UserList";
 import { ConnectionStatus, OfflineBanner } from "@/components/ConnectionStatus";
+import { SyncStatusPanel } from "@/components/SyncStatusPanel";
 
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
+import { syncedClock } from "@/lib/syncedClock";
+import { syncScheduler } from "@/lib/syncScheduler";
 
 const Room = () => {
   const { code } = useParams<{ code: string }>();
@@ -55,6 +58,7 @@ const Room = () => {
   const isInitializedRef = useRef(false);
   const isPlayingRef = useRef(false);
   const lastVetoToastRef = useRef<boolean | null>(null);
+  const isClockCalibratedRef = useRef(false);
 
   currentIndexRef.current = currentIndex;
   queueRef.current = queue;
@@ -77,10 +81,14 @@ const Room = () => {
 
     setCurrentIndex(nextIdx);
     
-    // Auto-advance: play next track automatically
-    setTimeout(() => {
-      playRef.current?.();
-    }, 100);
+    // Auto-advance: schedule next track with synced clock
+    const nextTrack = queueRef.current[nextIdx];
+    if (nextTrack && isHost && syncedClock.isReady()) {
+      // Schedule to start 2 seconds from now (synced time)
+      const targetTime = syncedClock.now() + 2000;
+      syncScheduler.scheduleTrack(nextTrack, targetTime, `track-${nextIdx}`);
+      syncScheduler.startCountdown();
+    }
   }, []);
 
   // Audio player hook
@@ -116,6 +124,17 @@ const Room = () => {
   seekRef.current = seek;
   getCurrentTimeRef.current = getCurrentTime;
 
+  // Phase 1: Calibrate the synced clock when the room is ready
+  useEffect(() => {
+    if (!myId || !roomCode) return;
+    
+    console.log(`[Room] Starting clock calibration...`);
+    syncedClock.calibrate(5).then(() => {
+      isClockCalibratedRef.current = true;
+      console.log(`[Room] ✅ Clock calibrated, sync ready`);
+    });
+  }, [myId, roomCode]);
+
   // Handle state changes from Firebase (PRIMARY sync for playback)
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
     console.log(`[Room] State change:`, state);
@@ -128,6 +147,7 @@ const Room = () => {
     const newIsPlaying = state.isPlaying ?? false;
     const newQueue = state.queue || [];
     const newVetoActive = state.vetoActive ?? true;
+    const newTargetSyncedTime = state.targetSyncedTime;
     
     // Update queue if different
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
@@ -138,7 +158,6 @@ const Room = () => {
     // Handle veto state change - show toast ONLY when it changes
     if (newVetoActive !== vetoActiveRef.current) {
       setVetoActive(newVetoActive);
-      // Only show toast if this is coming from host (not initial load)
       if (lastVetoToastRef.current !== null) {
         if (newVetoActive) {
           toast("Host restricted controls. You can add songs only.", { icon: "🔒" });
@@ -149,15 +168,24 @@ const Room = () => {
       lastVetoToastRef.current = newVetoActive;
     }
     
+    // Handle scheduled track from host
+    if (newTargetSyncedTime && newIndex !== undefined) {
+      const trackToSchedule = newQueue[newIndex];
+      if (trackToSchedule) {
+        console.log(`[Room] 📅 Received scheduled track: ${trackToSchedule.title} at synced time ${newTargetSyncedTime}`);
+        syncScheduler.scheduleTrack(trackToSchedule, newTargetSyncedTime, `track-${newIndex}`);
+        syncScheduler.startCountdown();
+      }
+    }
+    
     // Handle track change
     if (newIndex !== currentIndexRef.current) {
       console.log(`[Room] Track change: ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
     }
     
-    // Handle play/pause state
+    // Handle play/pause state (for immediate response, not scheduled)
     if (newIsPlaying) {
-      // Only seek+play if not already playing or if significantly out of sync (>1s)
       const timeDiff = Math.abs(getCurrentTimeRef.current() - newTime);
       if (!isPlayingRef.current || timeDiff > 1) {
         console.log(`[Room] Syncing play at ${newTime} (timeDiff: ${timeDiff})`);
@@ -175,7 +203,7 @@ const Room = () => {
     }
   }, [isHost]);
 
-  // Handle instant messages (kick, ban - NOT veto anymore)
+  // Handle instant messages
   const handleIncomingMessage = useCallback((msg: SyncMessage) => {
     console.log(`[Room] Received message:`, msg.type);
     
@@ -245,6 +273,13 @@ const Room = () => {
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
+  // Cleanup scheduler on unmount
+  useEffect(() => {
+    return () => {
+      syncScheduler.clear();
+    };
+  }, []);
+
   // Load initial state when connected (for members joining mid-session)
   useEffect(() => {
     if (!isConnected || !myId || isHost || isInitializedRef.current) return;
@@ -270,6 +305,16 @@ const Room = () => {
             setVetoActive(state.vetoActive);
             lastVetoToastRef.current = state.vetoActive;
           }
+
+          // If host has a scheduled track, schedule it locally too
+          if (state.targetSyncedTime && state.queue && state.queue[state.currentTrackIndex]) {
+            syncScheduler.scheduleTrack(
+              state.queue[state.currentTrackIndex],
+              state.targetSyncedTime,
+              `track-${state.currentTrackIndex}`
+            );
+            syncScheduler.startCountdown();
+          }
         }
         
         const userList = await getUsers();
@@ -293,6 +338,40 @@ const Room = () => {
     return true;
   }, [controlsLocked]);
 
+  /**
+   * Phase 2: Host schedules a track with a synced target time.
+   * This is the main entry point for the host to start a track.
+   */
+  const scheduleTrackForPlayback = useCallback((trackIdx: number, delayMs: number = 2000) => {
+    if (!isHost) return;
+    if (!syncedClock.isReady()) {
+      toast.error("Clock not calibrated yet. Please wait...");
+      return;
+    }
+
+    const track = queueRef.current[trackIdx];
+    if (!track) return;
+
+    // Calculate the target synced time (now + delay)
+    const targetSyncedTime = syncedClock.now() + delayMs;
+    
+    console.log(`[Room] 📅 HOST scheduling "${track.title}" for synced time ${targetSyncedTime} (in ${delayMs}ms)`);
+    
+    // Schedule locally (host's own playback)
+    syncScheduler.scheduleTrack(track, targetSyncedTime, `track-${trackIdx}`);
+    syncScheduler.startCountdown();
+    
+    // Broadcast to all members
+    updatePlaybackStateRef.current?.({
+      currentTrackIndex: trackIdx,
+      queue: queueRef.current,
+      targetSyncedTime,
+      isPlaying: false, // Will be triggered by scheduler
+    });
+
+    setCurrentIndex(trackIdx);
+  }, [isHost]);
+
   const handleTogglePlay = useCallback(() => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
@@ -301,23 +380,18 @@ const Room = () => {
 
     if (isPlayingRef.current) {
       pauseRef.current?.();
+      syncScheduler.clear();
       const time = getCurrentTime();
-      // Update state with current time for members
       updatePlaybackStateRef.current?.({
         isPlaying: false,
         currentTime: time,
+        targetSyncedTime: undefined, // Clear any scheduled time
       });
     } else {
-      playRef.current?.();
-      // Update state for members
-      updatePlaybackStateRef.current?.({
-        isPlaying: true,
-        currentTrackIndex: currentIndexRef.current,
-        currentTime: getCurrentTime(),
-        queue: queueRef.current,
-      });
+      // Schedule the current track to play in 2 seconds
+      scheduleTrackForPlayback(currentIndexRef.current, 2000);
     }
-  }, [isHost, getCurrentTime]);
+  }, [isHost, getCurrentTime, scheduleTrackForPlayback]);
 
   const handleNext = useCallback(() => {
     if (!isHost) {
@@ -330,19 +404,9 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current + 1) % queueRef.current.length;
 
-    setCurrentIndex(nextIdx);
-    
-    setTimeout(() => {
-      playRef.current?.();
-      // Update state for members
-      updatePlaybackStateRef.current?.({
-        isPlaying: true,
-        currentTrackIndex: nextIdx,
-        currentTime: 0,
-        queue: queueRef.current,
-      });
-    }, 100);
-  }, [isHost]);
+    // Schedule next track with synced clock (2s buffer for pre-fetch)
+    scheduleTrackForPlayback(nextIdx, 2000);
+  }, [isHost, isShuffle, scheduleTrackForPlayback]);
 
   const handlePrevious = useCallback(() => {
     if (!isHost) {
@@ -355,39 +419,16 @@ const Room = () => {
       ? Math.floor(Math.random() * queueRef.current.length)
       : (currentIndexRef.current - 1 + queueRef.current.length) % queueRef.current.length;
 
-    setCurrentIndex(prevIdx);
-    
-    setTimeout(() => {
-      playRef.current?.();
-      // Update state for members
-      updatePlaybackStateRef.current?.({
-        isPlaying: true,
-        currentTrackIndex: prevIdx,
-        currentTime: 0,
-        queue: queueRef.current,
-      });
-    }, 100);
-  }, [isHost]);
+    scheduleTrackForPlayback(prevIdx, 2000);
+  }, [isHost, isShuffle, scheduleTrackForPlayback]);
 
   const handleTrackClick = useCallback((idx: number) => {
     if (!isHost) {
       toast.error("Only the host can control playback.");
       return;
     }
-
-    setCurrentIndex(idx);
-    
-    setTimeout(() => {
-      playRef.current?.();
-      // Update state for members
-      updatePlaybackStateRef.current?.({
-        isPlaying: true,
-        currentTrackIndex: idx,
-        currentTime: 0,
-        queue: queueRef.current,
-      });
-    }, 100);
-  }, [isHost]);
+    scheduleTrackForPlayback(idx, 2000);
+  }, [isHost, scheduleTrackForPlayback]);
 
   const handleSeekFromBar = useCallback((time: number) => {
     if (!isHost) {
@@ -395,7 +436,6 @@ const Room = () => {
       return;
     }
     seekRef.current(time);
-    // Update state for members
     updatePlaybackStateRef.current?.({
       currentTime: time,
     });
@@ -414,7 +454,6 @@ const Room = () => {
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
     
-    // Update state for members
     updatePlaybackStateRef.current?.({
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
@@ -436,7 +475,6 @@ const Room = () => {
     const updatedQueue = [...queueRef.current, newTrack];
     setQueue(updatedQueue);
     
-    // Update state for members
     updatePlaybackStateRef.current?.({
       queue: updatedQueue,
       currentTrackIndex: currentIndexRef.current,
@@ -451,7 +489,6 @@ const Room = () => {
         toast.error("Host has restricted member controls.");
         return;
       }
-      // Non-host in non-locked mode - actually, only host should reorder
       toast.error("Only the host can reorder the queue.");
       return;
     }
@@ -470,7 +507,6 @@ const Room = () => {
     setQueue(newQueue);
     setCurrentIndex(newActive);
     
-    // Update state for members
     updatePlaybackStateRef.current?.({
       queue: newQueue,
       currentTrackIndex: newActive,
@@ -495,24 +531,21 @@ const Room = () => {
     setQueue(newQueue);
     setCurrentIndex(newActive);
     
-    // Update state for members
     updatePlaybackStateRef.current?.({
       queue: newQueue,
       currentTrackIndex: newActive,
     });
   }, [isHost]);
 
-  // Host toggles veto - NOW ONLY USES STATE UPDATE (no message broadcast)
+  // Host toggles veto
   const handleToggleVeto = useCallback(() => {
     if (!isHost) return;
     const next = !vetoActiveRef.current;
     setVetoActive(next);
     vetoActiveRef.current = next;
     
-    // Show toast to host immediately
     toast.success(next ? "Member controls locked." : "Member controls restored.");
     
-    // Only update state - this will sync to members via handleStateChange
     updatePlaybackStateRef.current?.({
       vetoActive: next,
     });
@@ -655,7 +688,7 @@ const Room = () => {
                   {isHost ? "YOU ARE HOST" : "SYNCED WITH HOST"}
                 </span>
               </div>
-              <span className="text-gray-500">FIREBASE REALTIME</span>
+              <span className="text-gray-500">PRECISION SYNC</span>
             </div>
 
             <TrackInfo track={currentTrack} />
@@ -683,6 +716,9 @@ const Room = () => {
               onToggleMute={() => setIsMuted(!isMuted)}
             />
           </div>
+
+          {/* Sync Status Panel */}
+          <SyncStatusPanel isHost={isHost} />
         </div>
 
         {/* Right Column */}
@@ -708,7 +744,7 @@ const Room = () => {
       </main>
 
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono">
-        Meoww - Firebase Powered Audio Sync
+        Meoww - Precision-Synced Audio (Server-Synced Clock)
       </footer>
     </div>
   );
