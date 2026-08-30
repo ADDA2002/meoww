@@ -5,11 +5,9 @@ import { RoomUser } from "@/types/music";
 interface ParticipantsListProps {
   users: RoomUser[];
   myId: string;
-  isHost: boolean;
-  onTransferHost: (userId: string) => void;
 }
 
-const ParticipantsList: React.FC<ParticipantsListProps> = ({ users, myId, isHost, onTransferHost }) => {
+const ParticipantsList: React.FC<ParticipantsListProps> = ({ users, myId }) => {
   return (
     <div className="border border-black bg-white p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
       <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
@@ -37,13 +35,6 @@ const ParticipantsList: React.FC<ParticipantsListProps> = ({ users, myId, isHost
                 <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase">
                   HOST
                 </span>
-              ) : isHost ? (
-                <button
-                  onClick={() => onTransferHost(user.id)}
-                  className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-neutral-800 transition-colors cursor-pointer"
-                >
-                  MAKE HOST
-                </button>
               ) : (
                 <span className="text-gray-400 text-[10px]">Listener</span>
               )}

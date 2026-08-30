@@ -25,6 +25,4 @@ export type SyncMessage =
   | { type: "PAUSE"; seekTime: number }
   | { type: "SEEK"; seekTime: number; timestamp: number }
   | { type: "UPDATE_QUEUE"; queue: Track[]; activeIndex: number }
-  | { type: "REQUEST_SYNC"; requesterId: string }
-  | { type: "HOST_TRANSFER"; newHostId: string }
   | { type: "CHAT"; sender: string; text: string; time: string };

@@ -54,7 +54,6 @@ const Room = () => {
     myId,
     userName,
     isHost,
-    setIsHost,
     isConnected,
     users,
     broadcast,
@@ -114,10 +113,6 @@ const Room = () => {
         audio.currentTime = Math.max(0, adjustedTime);
         setCurrentTime(audio.currentTime);
       }
-    },
-    onHostTransfer: (newHostId) => {
-      setIsHost(newHostId === myId);
-      toast.info(newHostId === myId ? "You are now the host!" : "Host controls transferred.");
     },
     onPeerDisconnect: (peerId) => {
       console.log("Peer disconnected:", peerId);
@@ -248,16 +243,6 @@ const Room = () => {
       newActive = Math.min(currentIndex, newQueue.length - 1);
     }
     updateQueueAndBroadcast(newQueue, newActive);
-  };
-
-  const handleTransferHost = (targetUserId: string) => {
-    if (!isHost) return;
-    broadcast({
-      type: "HOST_TRANSFER",
-      newHostId: targetUserId,
-    });
-    setIsHost(false);
-    toast.info("Host controls transferred.");
   };
 
   const handleLeaveRoom = () => {
@@ -419,8 +404,6 @@ const Room = () => {
           <ParticipantsList
             users={users}
             myId={myId}
-            isHost={isHost}
-            onTransferHost={handleTransferHost}
           />
           <QueuePanel
             queue={queue}

@@ -12,9 +12,7 @@ interface UseRoomSyncOptions {
   onPlay?: (trackIndex: number, seekTime: number, timestamp: number) => void;
   onPause?: (seekTime: number) => void;
   onSeek?: (seekTime: number, timestamp: number) => void;
-  onHostTransfer?: (newHostId: string) => void;
   onPeerDisconnect?: (peerId: string) => void;
-  onJoinRequest?: (user: RoomUser, respond: (accept: boolean, users: RoomUser[], queue: Track[], activeIndex: number) => void) => void;
 }
 
 export const useRoomSync = (options: UseRoomSyncOptions) => {
@@ -232,21 +230,6 @@ export const useRoomSync = (options: UseRoomSyncOptions) => {
           break;
         case "SEEK":
           options.onSeek?.(msg.seekTime, msg.timestamp);
-          break;
-        case "HOST_TRANSFER":
-          if (conn) {
-            // I'm receiving host transfer
-            setIsHost(true);
-            setIsHost(true); // Will be set again below
-            // Update user's own host status
-            setUsers((prev) =>
-              prev.map((u) => ({
-                ...u,
-                isHost: u.id === myId,
-              }))
-            );
-          }
-          options.onHostTransfer?.(msg.newHostId);
           break;
         default:
           break;
