@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
 import Peer from "peerjs";
 import { formatDisplayName } from "@/lib/nameFormat";
+import { PEER_CONFIG } from "@/lib/peerConfig";
 
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -24,19 +25,16 @@ const SpinningDigit = ({ char, direction, delay }: { char: string; direction: "u
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Wait for this digit's individual delay before starting to spin
     const startTimeout = setTimeout(() => {
       setIsSpinning(true);
       
-      // Spin through random characters slowly
-      const spinDuration = 1500 + Math.random() * 500; // 1500-2000ms (slower)
-      const intervalSpeed = 150; // How fast characters change (slower)
+      const spinDuration = 1500 + Math.random() * 500;
+      const intervalSpeed = 150;
       
       animationRef.current = setInterval(() => {
         setDisplayChar(ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]);
       }, intervalSpeed);
 
-      // Stop spinning and show final character
       timeoutRef.current = setTimeout(() => {
         if (animationRef.current) {
           clearInterval(animationRef.current);
@@ -86,9 +84,7 @@ const CyclingCodePlaceholder = () => {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      // Generate new code
       const newCode = generateRandomCode();
-      // Randomize directions for each digit
       const newDirections = Array.from({ length: 6 }, () => Math.random() > 0.5 ? "up" : "down") as ("up" | "down")[];
       
       setCodes(prev => [prev[1], newCode]);
@@ -144,9 +140,7 @@ const Index = () => {
     return new Promise((resolve) => {
       const hostPeerId = `meoww-room-${code.trim().toLowerCase()}`;
 
-      const checkPeer = new Peer({
-        debug: 0,
-      });
+      const checkPeer = new Peer(PEER_CONFIG);
 
       const timeout = setTimeout(() => {
         try { checkPeer.destroy(); } catch (e) { /* noop */ }
