@@ -344,12 +344,12 @@ const Index = () => {
                         }}
                         placeholder=""
                         maxLength={6}
-                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-semibold pr-12"
+                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black font-normal pr-12"
                       />
                       {/* Animated placeholder overlay */}
                       {!joinCode && (
                         <div className="absolute inset-0 flex items-center pl-3 pointer-events-none overflow-hidden">
-                          <span className="text-gray-400 font-mono tracking-widest text-sm">
+                          <span className="text-gray-400 font-mono tracking-widest text-sm font-normal">
                             <CyclingCodePlaceholder />
                           </span>
                         </div>
