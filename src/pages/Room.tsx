@@ -693,7 +693,7 @@ const Room = () => {
   return (
     <div className="min-h-screen bg-white text-black flex flex-col justify-between">
       {/* Top Room Navigation Bar */}
-      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between relative z-20 bg-white">
+      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 bg-white">
         <div className="flex items-center gap-2">
           <img
             src="/logo.gif"
