@@ -36,6 +36,9 @@ class FirebaseSignaling {
   private connected: boolean = false;
   private isDestroyed: boolean = false;
   
+  // Track message IDs we've already processed to prevent duplicates
+  private processedMessageIds: Set<string> = new Set();
+  
   // Store unsubscribe functions for cleanup
   private unsubscribers: (() => void)[] = [];
 
@@ -180,11 +183,18 @@ class FirebaseSignaling {
       const messages = snapshot.val();
       console.log(`[FirebaseSignaling] 🔔 onValue messages fired`);
       if (messages) {
-        Object.values(messages).forEach((msg: any) => {
+        Object.entries(messages).forEach(([msgId, msg]: [string, any]) => {
+          // Skip if we've already processed this message
+          if (this.processedMessageIds.has(msgId)) return;
+          
           // Filter out own messages to prevent echo
           if (msg.senderId !== this.myId) {
+            this.processedMessageIds.add(msgId);
             const { senderId, senderName, timestamp, ...syncMsg } = msg;
             this.notifyMessage(syncMsg as SyncMessage);
+          } else {
+            // Mark own messages as processed
+            this.processedMessageIds.add(msgId);
           }
         });
       }
