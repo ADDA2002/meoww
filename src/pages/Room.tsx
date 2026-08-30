@@ -6,7 +6,7 @@ import { DEFAULT_TRACKS } from "@/lib/defaultTracks";
 import { formatDisplayName } from "@/lib/nameFormat";
 import { Button } from "@/components/ui/button";
 import { Radio } from "lucide-react";
-import { db, ref, onValue, remove } from "@/lib/firebase";
+import { db, ref, onValue, remove, set, get } from "@/lib/firebase";
 
 import RoomDrawer from "@/components/RoomDrawer";
 import { PlayerControls } from "@/components/PlayerControls";
@@ -112,18 +112,10 @@ const Room = () => {
   pauseRef.current = pause;
   seekRef.current = seek;
 
-  // Firebase refs
-  const stateRef = useRef<any>(null);
-  const usersRef = useRef<any>(null);
-  const messagesRef = useRef<any>(null);
-  const userRef = useRef<any>(null);
-  const roomRef = useRef<any>(null);
-
   // Broadcast function for messages
   const broadcast = useCallback((msg: SyncMessage) => {
     if (!db) return;
-    const msgRef = ref(db, `rooms/${roomCode.toLowerCase()}/messages`);
-    push(msgRef, {
+    push(ref(db, `rooms/${roomCode.toLowerCase()}/messages`), {
       ...msg,
       senderId: myId,
       senderName: userName,
@@ -133,7 +125,7 @@ const Room = () => {
 
   // Update Firebase state (host only)
   const updateState = useCallback((updates: any) => {
-    if (!db || !isHost || !stateRef.current) return;
+    if (!db || !isHost) return;
     const updateId = `${myId}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     set(ref(db, `rooms/${roomCode.toLowerCase()}/state`), {
       ...updates,
@@ -200,30 +192,33 @@ const Room = () => {
   // Firebase sync - connect to room
   useEffect(() => {
     if (!roomCode || !myId) return;
+    
+    // If Firebase is not available, run in offline mode
     if (!db) {
+      console.log("[Room] Firebase not available, running in offline mode");
       setIsConnected(true);
       return;
     }
 
     const roomCodeLower = roomCode.toLowerCase();
-    stateRef.current = ref(db, `rooms/${roomCodeLower}/state`);
-    usersRef.current = ref(db, `rooms/${roomCodeLower}/users`);
-    messagesRef.current = ref(db, `rooms/${roomCodeLower}/messages`);
-    userRef.current = ref(db, `rooms/${roomCodeLower}/users/${myId}`);
-    roomRef.current = ref(db, `rooms/${roomCodeLower}`);
+    const stateRefFirebase = ref(db, `rooms/${roomCodeLower}/state`);
+    const usersRefFirebase = ref(db, `rooms/${roomCodeLower}/users`);
+    const messagesRefFirebase = ref(db, `rooms/${roomCodeLower}/messages`);
+    const userRefFirebase = ref(db, `rooms/${roomCodeLower}/users/${myId}`);
+    const roomRefFirebase = ref(db, `rooms/${roomCodeLower}`);
 
     // Set user presence
-    set(userRef.current, {
+    set(userRefFirebase, {
       id: myId,
       name: userName,
       isHost,
       joinedAt: Date.now(),
       lastSeen: Date.now()
-    });
+    }).catch(console.error);
 
     // If host, initialize state
     if (isHost) {
-      set(stateRef.current, {
+      set(stateRefFirebase, {
         roomCode: roomCodeLower,
         hostId: myId,
         currentTrackIndex: 0,
@@ -234,21 +229,24 @@ const Room = () => {
         lastUpdateId: `init-${Date.now()}`,
         lastUpdated: Date.now(),
         timestamp: Date.now()
-      });
+      }).catch(console.error);
     }
 
+    // Mark as connected
     setIsConnected(true);
 
     // Listen for room deletion
-    const roomUnsub = onValue(roomRef.current, (snapshot: any) => {
+    const roomUnsub = onValue(roomRefFirebase, (snapshot) => {
       if (!snapshot.exists() && !isHost) {
         pauseRef.current?.();
         setSessionEnded(true);
       }
+    }, (error) => {
+      console.error("Room listener error:", error);
     });
 
     // Listen for users
-    const usersUnsub = onValue(usersRef.current, (snapshot: any) => {
+    const usersUnsub = onValue(usersRefFirebase, (snapshot) => {
       const usersData = snapshot.val();
       if (usersData) {
         const userList: RoomUser[] = Object.values(usersData);
@@ -265,10 +263,12 @@ const Room = () => {
       } else {
         setUsers([]);
       }
+    }, (error) => {
+      console.error("Users listener error:", error);
     });
 
     // Listen for state changes (PRIMARY sync)
-    const stateUnsub = onValue(stateRef.current, (snapshot: any) => {
+    const stateUnsub = onValue(stateRefFirebase, (snapshot) => {
       const state = snapshot.val();
       if (!state) return;
 
@@ -320,10 +320,12 @@ const Room = () => {
           pauseRef.current?.();
         }
       }
+    }, (error) => {
+      console.error("State listener error:", error);
     });
 
     // Listen for messages
-    const messagesUnsub = onValue(messagesRef.current, (snapshot: any) => {
+    const messagesUnsub = onValue(messagesRefFirebase, (snapshot) => {
       const messages = snapshot.val();
       if (messages) {
         Object.values(messages).forEach((msg: any) => {
@@ -332,6 +334,8 @@ const Room = () => {
           }
         });
       }
+    }, (error) => {
+      console.error("Messages listener error:", error);
     });
 
     return () => {
@@ -341,13 +345,11 @@ const Room = () => {
       messagesUnsub();
       
       // Clean up presence
-      if (userRef.current) {
-        remove(userRef.current);
-      }
+      remove(userRefFirebase).catch(() => {});
       
       // If host, delete room
-      if (isHost && roomRef.current) {
-        remove(roomRef.current);
+      if (isHost) {
+        remove(roomRefFirebase).catch(() => {});
       }
     };
   }, [roomCode, myId, isHost]);
@@ -360,43 +362,38 @@ const Room = () => {
     const loadInitialState = async () => {
       console.log(`[Room] Loading initial state...`);
       
-      const snapshot = await get(stateRef.current);
-      const state = snapshot.val();
-      
-      if (state) {
-        console.log(`[Room] Got initial state:`, state);
+      try {
+        const stateSnapshot = await get(ref(db, `rooms/${roomCode.toLowerCase()}/state`));
+        const state = stateSnapshot.val();
         
-        if (state.queue && state.queue.length > 0) {
-          setQueue(state.queue);
+        if (state) {
+          console.log(`[Room] Got initial state:`, state);
+          
+          if (state.queue && state.queue.length > 0) {
+            setQueue(state.queue);
+          }
+          
+          if (state.currentTrackIndex !== undefined) {
+            setCurrentIndex(state.currentTrackIndex);
+          }
+          
+          if (state.vetoActive !== undefined) {
+            setVetoActive(state.vetoActive);
+          }
         }
         
-        if (state.currentTrackIndex !== undefined) {
-          setCurrentIndex(state.currentTrackIndex);
+        const usersSnapshot = await get(ref(db, `rooms/${roomCode.toLowerCase()}/users`));
+        const usersData = usersSnapshot.val();
+        if (usersData) {
+          setUsers(Object.values(usersData));
         }
-        
-        if (state.vetoActive !== undefined) {
-          setVetoActive(state.vetoActive);
-        }
-      }
-      
-      const usersSnapshot = await get(usersRef.current);
-      const usersData = usersSnapshot.val();
-      if (usersData) {
-        setUsers(Object.values(usersData));
+      } catch (err) {
+        console.error(`[Room] Error loading initial state:`, err);
       }
     };
 
     loadInitialState();
-  }, [isConnected, myId, isHost]);
-
-  // Guard: prevent locked members from triggering sync actions
-  const requireControlAccess = useCallback((): boolean => {
-    if (controlsLocked) {
-      toast.error("Host has restricted member controls. You can only add songs.");
-      return false;
-    }
-    return true;
-  }, [controlsLocked]);
+  }, [isConnected, myId, isHost, roomCode]);
 
   const handleTogglePlay = useCallback(() => {
     if (!isHost) {
@@ -468,7 +465,6 @@ const Room = () => {
     updateState({ currentTime: time });
   }, [isHost, updateState]);
 
-  // Queue management
   const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
     const newTrack: Track = {
       id: `track-${Date.now()}`,
@@ -535,7 +531,6 @@ const Room = () => {
     updateState({ queue: newQueue, currentTrackIndex: newActive });
   }, [isHost, updateState]);
 
-  // Host toggles veto
   const handleToggleVeto = useCallback(() => {
     if (!isHost) return;
     const next = !vetoActiveRef.current;

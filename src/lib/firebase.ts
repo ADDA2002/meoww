@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, get, Database } from "firebase/database";
+import { getDatabase, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, get, Database, connectDatabaseEmulator } from "firebase/database";
 
 // Firebase config
 const firebaseConfig = {
@@ -14,13 +14,15 @@ const firebaseConfig = {
 
 // Initialize Firebase
 let db: Database | null = null;
+let firebaseInitError: string | null = null;
 
 try {
   const app = initializeApp(firebaseConfig);
   db = getDatabase(app);
   console.log("✅ Firebase connected");
-} catch (error) {
+} catch (error: any) {
   console.error("❌ Firebase init failed:", error);
+  firebaseInitError = error?.message || "Unknown error";
 }
 
-export { db, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, get };
+export { db, ref, onValue, set, push, remove, onDisconnect, serverTimestamp, get, firebaseInitError };
