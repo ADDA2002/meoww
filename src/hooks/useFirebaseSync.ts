@@ -12,6 +12,7 @@ interface UseFirebaseSyncOptions {
   isPlaying: boolean;
   onMessage: (msg: SyncMessage) => void;
   onSessionEnded?: () => void;
+  onInitialState?: (state: FirebaseSyncState | null) => void;
   onKicked?: (targetName: string, reason?: string) => void;
   onBanned?: (targetName: string, reason?: string) => void;
 }
@@ -26,8 +27,7 @@ export function useFirebaseSync({
   isPlaying,
   onMessage,
   onSessionEnded,
-  onKicked,
-  onBanned,
+  onInitialState,
 }: UseFirebaseSyncOptions) {
   const signalingRef = useRef<FirebaseSignaling | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -50,6 +50,10 @@ export function useFirebaseSync({
 
     if (onSessionEnded) {
       signaling.onSessionEnded(onSessionEnded);
+    }
+
+    if (onInitialState) {
+      signaling.onStateChange(onInitialState);
     }
 
     signaling.connect();
@@ -102,11 +106,16 @@ export function useFirebaseSync({
     return signalingRef.current?.getUsers() || [];
   }, []);
 
+  const getState = useCallback(async () => {
+    return signalingRef.current?.getState() || null;
+  }, []);
+
   return {
     isConnected,
     broadcast,
     kickUser,
     banUser,
     getUsers,
+    getState,
   };
 }
