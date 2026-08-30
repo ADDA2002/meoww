@@ -49,7 +49,7 @@ const Room = () => {
   const [kicked, setKicked] = useState<boolean>(false);
   const [banned, setBanned] = useState<boolean>(false);
 
-  // Audio state - now driven entirely by syncScheduler for both host and members
+  // Audio state - driven by syncScheduler for both host and members
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -86,12 +86,15 @@ const Room = () => {
       setDuration(audioEl.duration || 0);
     };
     const handlePlay = () => {
+      console.log("[Room] 🎵 audioElement play event fired!");
       setSchedulerIsPlaying(true);
     };
     const handlePause = () => {
+      console.log("[Room] ⏸️ audioElement pause event fired!");
       setSchedulerIsPlaying(false);
     };
     const handleEnded = () => {
+      console.log("[Room] ⏹️ audioElement ended event fired!");
       setSchedulerIsPlaying(false);
       // Auto-advance for host
       if (isHost && queueRef.current.length > 0) {
@@ -114,6 +117,8 @@ const Room = () => {
     audioEl.addEventListener("play", handlePlay);
     audioEl.addEventListener("pause", handlePause);
     audioEl.addEventListener("ended", handleEnded);
+
+    console.log("[Room] Audio element listeners attached");
 
     return () => {
       audioEl.removeEventListener("timeupdate", handleTimeUpdate);
@@ -142,26 +147,28 @@ const Room = () => {
   // Phase 1: Calibrate the synced clock when the room is ready
   useEffect(() => {
     if (!myId || !roomCode) return;
+    if (isClockCalibratedRef.current) return;
     
     console.log(`[Room] Starting clock calibration...`);
+    isClockCalibratedRef.current = true;
+    
     syncedClock.calibrate(5).then(() => {
-      isClockCalibratedRef.current = true;
       console.log(`[Room] ✅ Clock calibrated, sync ready`);
     });
   }, [myId, roomCode]);
 
   // Handle state changes from Firebase (PRIMARY sync for playback)
   const handleStateChange = useCallback((state: FirebaseSyncState) => {
-    console.log(`[Room] State change:`, state);
+    console.log(`[Room] State change received:`, JSON.stringify(state, null, 2));
     
     // Only non-host members should follow host's state
     if (isHost) return;
     
     const newIndex = state.currentTrackIndex ?? 0;
-    const newTime = state.currentTime ?? 0;
     const newQueue = state.queue || [];
     const newVetoActive = state.vetoActive ?? true;
     const newTargetSyncedTime = state.targetSyncedTime;
+    const newIsPlaying = state.isPlaying ?? false;
     
     // Update queue if different
     if (newQueue.length > 0 && JSON.stringify(newQueue) !== JSON.stringify(queueRef.current)) {
@@ -186,23 +193,47 @@ const Room = () => {
     if (newTargetSyncedTime && newIndex !== undefined) {
       const trackToSchedule = newQueue[newIndex];
       if (trackToSchedule) {
-        console.log(`[Room] 📅 Received scheduled track: ${trackToSchedule.title} at synced time ${newTargetSyncedTime}`);
+        console.log(`[Room] 📅 MEMBER: Received scheduled track: "${trackToSchedule.title}" at synced time ${newTargetSyncedTime}`);
+        console.log(`[Room] 📅 MEMBER: Current synced time: ${syncedClock.now()}, Clock ready: ${syncedClock.isReady()}`);
+        
+        // Clear any existing scheduled tracks first
+        syncScheduler.clear();
+        
+        // Schedule the track
         syncScheduler.scheduleTrack(trackToSchedule, newTargetSyncedTime, `track-${newIndex}`);
         syncScheduler.startCountdown();
+        
         setCurrentIndex(newIndex);
+        
+        // If the target time has already passed, trigger immediately
+        if (syncedClock.isReady() && syncedClock.now() >= newTargetSyncedTime) {
+          console.log(`[Room] 📅 MEMBER: Target time already passed, triggering immediately`);
+          // Force trigger by checking the scheduler
+          const audioEl = syncScheduler.getAudioElement();
+          const scheduledTrack = syncScheduler.getAllTracks()[0];
+          if (scheduledTrack && scheduledTrack.blobUrl) {
+            audioEl.src = scheduledTrack.blobUrl;
+            audioEl.currentTime = 0;
+            audioEl.play().catch(console.error);
+          }
+        }
       }
     } else if (newIndex !== currentIndexRef.current) {
-      // Track change without scheduled time
-      console.log(`[Room] Track change: ${currentIndexRef.current} -> ${newIndex}`);
+      // Track change without scheduled time - just update the index
+      console.log(`[Room] MEMBER: Track change (no schedule): ${currentIndexRef.current} -> ${newIndex}`);
       setCurrentIndex(newIndex);
     }
 
-    // Handle seek for already-playing track
-    if (newTime !== undefined && newTime > 0) {
+    // Handle play/pause commands (for immediate response when not using scheduled sync)
+    if (newIsPlaying && !newTargetSyncedTime) {
       const audioEl = syncScheduler.getAudioElement();
-      // Only seek if there's a meaningful difference
-      if (Math.abs(audioEl.currentTime - newTime) > 1.5) {
-        audioEl.currentTime = newTime;
+      if (audioEl.paused) {
+        audioEl.play().catch(console.error);
+      }
+    } else if (!newIsPlaying && !newTargetSyncedTime) {
+      const audioEl = syncScheduler.getAudioElement();
+      if (!audioEl.paused) {
+        audioEl.pause();
       }
     }
   }, [isHost]);
@@ -273,6 +304,7 @@ const Room = () => {
       ? `host-${roomCode.toLowerCase()}`
       : `user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
+    console.log(`[Room] Initializing with ID: ${generatedId}`);
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
@@ -289,12 +321,12 @@ const Room = () => {
     isInitializedRef.current = true;
 
     const loadInitialState = async () => {
-      console.log(`[Room] Loading initial state...`);
+      console.log(`[Room] MEMBER: Loading initial state...`);
       
       try {
         const state = await getState();
         if (state) {
-          console.log(`[Room] Got initial state:`, state);
+          console.log(`[Room] MEMBER: Got initial state:`, JSON.stringify(state, null, 2));
           
           if (state.queue && state.queue.length > 0) {
             setQueue(state.queue);
@@ -311,6 +343,7 @@ const Room = () => {
 
           // If host has a scheduled track, schedule it locally too
           if (state.targetSyncedTime && state.queue && state.queue[state.currentTrackIndex]) {
+            console.log(`[Room] MEMBER: Scheduling existing track from initial state`);
             syncScheduler.scheduleTrack(
               state.queue[state.currentTrackIndex],
               state.targetSyncedTime,
@@ -325,7 +358,7 @@ const Room = () => {
           setUsers(userList);
         }
       } catch (err) {
-        console.error(`[Room] Error loading initial state:`, err);
+        console.error(`[Room] MEMBER: Error loading initial state:`, err);
       }
     };
 

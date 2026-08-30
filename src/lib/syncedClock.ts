@@ -23,6 +23,7 @@ class SyncedClock {
   private rtt: number = 0;
   private isCalibrated: boolean = false;
   private calibrationListeners: ((calibrated: boolean) => void)[] = [];
+  private isCalibrating: boolean = false;
 
   /**
    * Performs a single ping to measure RTT and clock offset.
@@ -30,7 +31,6 @@ class SyncedClock {
    */
   async ping(): Promise<PingResult> {
     if (!db) {
-      // Fallback: assume no offset if Firebase unavailable
       console.warn("[SyncedClock] Firebase unavailable, using local time");
       return {
         rtt: 0,
@@ -93,14 +93,24 @@ class SyncedClock {
    * Uses median filtering to reject outliers.
    */
   async calibrate(pingCount: number = 5): Promise<void> {
-    if (this.isCalibrated) return;
+    if (this.isCalibrated) {
+      console.log("[SyncedClock] Already calibrated, skipping");
+      return;
+    }
 
+    if (this.isCalibrating) {
+      console.log("[SyncedClock] Calibration already in progress, skipping");
+      return;
+    }
+
+    this.isCalibrating = true;
     console.log(`[SyncedClock] Calibrating with ${pingCount} pings...`);
     
     const results: PingResult[] = [];
     for (let i = 0; i < pingCount; i++) {
       const result = await this.ping();
       results.push(result);
+      console.log(`[SyncedClock] Ping ${i + 1}/${pingCount}: RTT=${result.rtt.toFixed(1)}ms, offset=${result.offset.toFixed(1)}ms`);
       // Small delay between pings
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -115,8 +125,9 @@ class SyncedClock {
     this.offset = medianOffset;
     this.rtt = avgRtt;
     this.isCalibrated = true;
+    this.isCalibrating = false;
 
-    console.log(`[SyncedClock] ✅ Calibrated: offset=${medianOffset}ms, avgRtt=${avgRtt.toFixed(1)}ms`);
+    console.log(`[SyncedClock] ✅ Calibrated: offset=${medianOffset.toFixed(1)}ms, avgRtt=${avgRtt.toFixed(1)}ms, syncedNow=${this.now()}`);
     
     this.calibrationListeners.forEach(cb => cb(true));
   }

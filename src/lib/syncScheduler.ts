@@ -36,8 +36,11 @@ class SyncScheduler {
 
   constructor() {
     // Create a single shared audio element
-    this.audioElement = new Audio();
-    this.audioElement.preload = "auto";
+    if (typeof window !== "undefined") {
+      this.audioElement = new Audio();
+      this.audioElement.preload = "auto";
+      console.log("[SyncScheduler] Audio element created");
+    }
   }
 
   /**
@@ -87,17 +90,19 @@ class SyncScheduler {
       // Get the entire file as a Blob
       const blob = await response.blob();
       
+      console.log(`[SyncScheduler] 📥 Blob created, size: ${blob.size} bytes, type: ${blob.type}`);
+      
       // Create a local URL for the blob (this is in-memory, not network)
       const blobUrl = URL.createObjectURL(blob);
+      
+      console.log(`[SyncScheduler] ✅ Buffered "${track.track.title}" - Blob URL: ${blobUrl.substring(0, 50)}...`);
       
       // Update track with blob URL and mark as buffered
       track.blobUrl = blobUrl;
       track.status = "buffered";
       this.notifyListeners();
-
-      console.log(`[SyncScheduler] ✅ Buffered "${track.track.title}" (${(blob.size / 1024).toFixed(1)}KB)`);
     } catch (err) {
-      console.error(`[SyncScheduler] ❌ Failed to fetch:`, err);
+      console.error(`[SyncScheduler] ❌ Failed to fetch audio:`, err);
       track.status = "failed";
       track.error = err instanceof Error ? err.message : "Unknown error";
       this.notifyListeners();
@@ -113,7 +118,11 @@ class SyncScheduler {
       clearInterval(this.countdownInterval);
     }
 
-    console.log(`[SyncScheduler] ⏱️ Starting precision countdown...`);
+    if (!syncedClock.isReady()) {
+      console.log(`[SyncScheduler] ⏱️ Countdown started but clock NOT calibrated yet`);
+    } else {
+      console.log(`[SyncScheduler] ⏱️ Countdown started - synced now: ${syncedClock.now()}`);
+    }
 
     // Check every 10ms for sub-frame precision
     this.countdownInterval = setInterval(() => {
@@ -137,19 +146,35 @@ class SyncScheduler {
    * Triggers playback at the exact synced millisecond.
    */
   private checkAndTrigger(): void {
-    if (!this.audioElement || !syncedClock.isReady()) return;
+    if (!this.audioElement) {
+      console.warn("[SyncScheduler] No audio element available");
+      return;
+    }
+
+    if (!syncedClock.isReady()) {
+      return; // Clock not ready, skip this check
+    }
 
     const syncedNow = syncedClock.now();
 
     for (const [trackId, track] of this.tracks.entries()) {
       if (track.status === "playing" || track.status === "failed") continue;
 
-      // Check if we've reached the target time AND the file is buffered
-      if (syncedNow >= track.targetSyncedTime && track.blobUrl) {
-        this.triggerPlayback(trackId, track);
-      } else if (syncedNow >= track.targetSyncedTime && !track.blobUrl) {
-        // Target time reached but not buffered yet - this is a sync failure
-        console.warn(`[SyncScheduler] ⚠️ Target time reached but track not buffered yet`);
+      const timeUntilTarget = track.targetSyncedTime - syncedNow;
+      
+      // Log countdown every second
+      if (timeUntilTarget > 0 && timeUntilTarget <= 5000 && timeUntilTarget % 1000 < 10) {
+        console.log(`[SyncScheduler] ⏱️ Countdown: ${(timeUntilTarget / 1000).toFixed(1)}s until "${track.track.title}" plays`);
+      }
+
+      // Check if we've reached the target time
+      if (syncedNow >= track.targetSyncedTime) {
+        if (track.blobUrl) {
+          console.log(`[SyncScheduler] 🎵 Target time reached! blobUrl exists. Calling triggerPlayback for "${track.track.title}"`);
+          this.triggerPlayback(trackId, track);
+        } else {
+          console.warn(`[SyncScheduler] ⚠️ Target time reached but blobUrl is undefined! Status: ${track.status}`);
+        }
       }
     }
   }
@@ -159,9 +184,18 @@ class SyncScheduler {
    * Audio is already in memory, so this triggers instant execution.
    */
   private triggerPlayback(trackId: string, scheduled: ScheduledTrack): void {
-    if (!this.audioElement || !scheduled.blobUrl) return;
+    if (!this.audioElement) {
+      console.error("[SyncScheduler] ❌ No audio element in triggerPlayback!");
+      return;
+    }
+
+    if (!scheduled.blobUrl) {
+      console.error("[SyncScheduler] ❌ triggerPlayback called but blobUrl is undefined!");
+      return;
+    }
 
     console.log(`[SyncScheduler] 🎵 THE DROP: Playing "${scheduled.track.title}" at synced time ${syncedClock.now()}`);
+    console.log(`[SyncScheduler] 🎵 Blob URL: ${scheduled.blobUrl.substring(0, 50)}...`);
 
     // Set the source to the pre-fetched blob
     this.audioElement.src = scheduled.blobUrl;
@@ -169,16 +203,25 @@ class SyncScheduler {
     this.audioElement.volume = 1.0;
 
     // Play!
-    this.audioElement.play().catch(err => {
-      console.error(`[SyncScheduler] ❌ Playback failed:`, err);
-      scheduled.status = "failed";
-      scheduled.error = err.message;
+    const playPromise = this.audioElement.play();
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        console.log(`[SyncScheduler] ✅ Play started successfully for "${scheduled.track.title}"`);
+        scheduled.status = "playing";
+        this.activeTrackId = trackId;
+        this.notifyListeners();
+      }).catch(err => {
+        console.error(`[SyncScheduler] ❌ Playback failed:`, err);
+        scheduled.status = "failed";
+        scheduled.error = err.message;
+        this.notifyListeners();
+      });
+    } else {
+      // Older browser that doesn't return a promise
+      scheduled.status = "playing";
+      this.activeTrackId = trackId;
       this.notifyListeners();
-    });
-
-    scheduled.status = "playing";
-    this.activeTrackId = trackId;
-    this.notifyListeners();
+    }
   }
 
   /**
@@ -198,7 +241,12 @@ class SyncScheduler {
    * Get the audio element (for UI controls to attach to).
    */
   getAudioElement(): HTMLAudioElement {
-    return this.audioElement!;
+    if (!this.audioElement) {
+      console.warn("[SyncScheduler] Audio element was null, creating new one");
+      this.audioElement = new Audio();
+      this.audioElement.preload = "auto";
+    }
+    return this.audioElement;
   }
 
   /**
