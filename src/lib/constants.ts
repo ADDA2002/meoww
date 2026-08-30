@@ -8,6 +8,15 @@ export const generateRoomCode = (length: number = 6): string => {
   ).join("");
 };
 
+export const formatDisplayName = (name: string): string => {
+  if (!name) return "";
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  const firstChar = trimmed.charAt(0).toUpperCase();
+  const rest = trimmed.slice(1).toLowerCase();
+  return firstChar + rest;
+};
+
 export const DEFAULT_TRACKS: Track[] = [
   {
     id: "track-1",
