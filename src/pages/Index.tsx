@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChevronDown, Radio } from "lucide-react";
 import { formatDisplayName } from "@/utils/nameFormat";
-import { checkFirebaseRoomExists } from "@/services/firebaseRoomCheck";
 
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -16,83 +15,6 @@ const generateRandomCode = () => {
   ).join("");
 };
 
-// Single spinning digit component
-const SpinningDigit = ({ char, direction, delay }: { char: string; direction: "up" | "down"; delay: number }) => {
-  const [displayChar, setDisplayChar] = useState(char);
-  const [isSpinning, setIsSpinning] = useState(false);
-  const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    const startTimeout = setTimeout(() => {
-      setIsSpinning(true);
-      const spinDuration = 1500 + Math.random() * 500;
-      const intervalSpeed = 150;
-      animationRef.current = setInterval(() => {
-        setDisplayChar(ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]);
-      }, intervalSpeed);
-      timeoutRef.current = setTimeout(() => {
-        if (animationRef.current) {
-          clearInterval(animationRef.current);
-          animationRef.current = null;
-        }
-        setDisplayChar(char);
-        setIsSpinning(false);
-      }, spinDuration);
-    }, delay);
-    return () => {
-      clearTimeout(startTimeout);
-      if (animationRef.current) clearInterval(animationRef.current);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, [char, delay]);
-
-  return (
-    <span
-      className={`inline-block w-5 text-center transition-all duration-300 ${
-        isSpinning ? "opacity-50" : "opacity-100"
-      }`}
-      style={{
-        transform: isSpinning 
-          ? direction === "up" 
-            ? "translateY(-100%)" 
-            : "translateY(100%)"
-          : "translateY(0)",
-      }}
-    >
-      {displayChar}
-    </span>
-  );
-};
-
-const CyclingCodePlaceholder = () => {
-  const [codes, setCodes] = useState<string[]>(() => [generateRandomCode(), generateRandomCode()]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [directions, setDirections] = useState<("up" | "down")[]>(() => 
-    Array.from({ length: 6 }, () => Math.random() > 0.5 ? "up" : "down")
-  );
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const newCode = generateRandomCode();
-      const newDirections = Array.from({ length: 6 }, () => Math.random() > 0.5 ? "up" : "down") as ("up" | "down")[];
-      setCodes(prev => [prev[1], newCode]);
-      setDirections(newDirections);
-      setCurrentIndex(prev => (prev + 1) % 2);
-    }, 4000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const currentCode = codes[currentIndex];
-  return (
-    <span className="inline-block text-lg">
-      {currentCode.split("").map((char, i) => (
-        <SpinningDigit key={i} char={char} direction={directions[i]} delay={i * 200} />
-      ))}
-    </span>
-  );
-};
-
 const Index = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"create" | "join" | null>(null);
@@ -100,7 +22,6 @@ const Index = () => {
   const [joinName, setJoinName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
-  const [isCheckingRoom, setIsCheckingRoom] = useState(false);
 
   const handleTabClick = (tab: "create" | "join") => {
     if (activeTab === tab) {
@@ -124,7 +45,7 @@ const Index = () => {
     navigate(`/room/${generatedCode}?name=${encodeURIComponent(formattedName)}&host=true`);
   };
 
-  const handleJoinRoom = async (e: React.FormEvent) => {
+  const handleJoinRoom = (e: React.FormEvent) => {
     e.preventDefault();
     setJoinError(null);
 
@@ -140,22 +61,8 @@ const Index = () => {
       return;
     }
 
-    setIsCheckingRoom(true);
-
-    try {
-      const roomExists = await checkFirebaseRoomExists(cleanCode);
-      if (!roomExists) {
-        setJoinError(`Room "${cleanCode}" doesn't exist. Check the code and try again.`);
-        setIsCheckingRoom(false);
-        return;
-      }
-      const formattedName = formatDisplayName(joinName);
-      navigate(`/room/${cleanCode}?name=${encodeURIComponent(formattedName)}&host=false`);
-    } catch (err) {
-      // On any error, just navigate through (silent fallback)
-      const formattedName = formatDisplayName(joinName);
-      navigate(`/room/${cleanCode}?name=${encodeURIComponent(formattedName)}&host=false`);
-    }
+    const formattedName = formatDisplayName(joinName);
+    navigate(`/room/${cleanCode}?name=${encodeURIComponent(formattedName)}&host=false`);
   };
 
   return (
@@ -224,18 +131,9 @@ const Index = () => {
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="join-code" className="text-xs font-mono uppercase text-gray-700">6-Letter Room Code</Label>
-                    <div className="relative">
-                      <Input id="join-code" value={joinCode} onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setJoinError(null); }}
-                        placeholder="" maxLength={6}
-                        className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-[0.5em] placeholder-gray-400 focus:border-black text-lg pl-4 pr-12" />
-                      {!joinCode && (
-                        <div className="absolute inset-0 flex items-center pl-4 pointer-events-none overflow-hidden">
-                          <span className="text-gray-400 font-mono tracking-[0.5em] text-lg">
-                            <CyclingCodePlaceholder />
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                    <Input id="join-code" value={joinCode} onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setJoinError(null); }}
+                      placeholder="e.g. X9KJ2B" maxLength={6}
+                      className="bg-gray-50 border-gray-300 text-black uppercase font-mono tracking-widest placeholder-gray-400 focus:border-black text-lg" />
                   </div>
                   {joinError && (
                     <div className="border border-red-500 bg-red-50 text-red-700 px-3 py-2 text-xs font-mono">
@@ -244,8 +142,8 @@ const Index = () => {
                   )}
                   <Button type="submit"
                     className="w-full bg-black hover:bg-neutral-800 text-white font-semibold py-2.5 text-sm uppercase tracking-wider transition-colors"
-                    disabled={isCheckingRoom || !joinName.trim() || !joinCode.trim()}>
-                    {isCheckingRoom ? "Checking room..." : "Join Session"}
+                    disabled={!joinName.trim() || !joinCode.trim()}>
+                    Join Session
                   </Button>
                 </form>
               </div>

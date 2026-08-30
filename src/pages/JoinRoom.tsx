@@ -3,7 +3,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import Header from "@/components/Header";
-import { checkFirebaseRoomExists } from "@/services/firebaseRoomCheck";
 import { formatDisplayName } from "@/utils/nameFormat";
 
 const JoinRoom = () => {
@@ -31,20 +30,8 @@ const JoinRoom = () => {
     }
 
     setIsJoining(true);
-
-    try {
-      const roomExists = await checkFirebaseRoomExists(cleanCode);
-      if (!roomExists) {
-        setError(`Room "${cleanCode}" doesn't exist. Check the code and try again.`);
-        setIsJoining(false);
-        return;
-      }
-      const formattedName = formatDisplayName(userName);
-      window.location.href = `/room/${cleanCode}?name=${encodeURIComponent(formattedName)}&host=false`;
-    } catch (err) {
-      setError("Couldn't verify the room. Check your connection and try again.");
-      setIsJoining(false);
-    }
+    const formattedName = formatDisplayName(userName);
+    window.location.href = `/room/${cleanCode}?name=${encodeURIComponent(formattedName)}&host=false`;
   };
 
   return (
@@ -80,7 +67,7 @@ const JoinRoom = () => {
           <Button onClick={handleJoinRoom}
             className="w-full bg-black hover:bg-gray-800 text-white font-medium py-2 transition-colors"
             disabled={isJoining || !(userName.trim() && roomCode.trim())}>
-            {isJoining ? "Checking room..." : "Join Room"}
+            {isJoining ? "Joining..." : "Join Room"}
           </Button>
 
           <div className="text-center">
