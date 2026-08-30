@@ -12,7 +12,6 @@ import {
   ArrowUp, 
   ArrowDown, 
   Trash2, 
-  Radio, 
   Music, 
   Upload, 
   Users,
@@ -101,7 +100,6 @@ const Room = () => {
       
       const timeout = setTimeout(() => {
         try { testPeer.destroy(); } catch (e) { /* noop */ }
-        // Use last known ping or show dash
         setPing((prev) => prev || 0);
       }, 2000);
 
@@ -129,10 +127,7 @@ const Room = () => {
       });
     };
 
-    // Initial ping after connection
     const initialTimer = setTimeout(measurePing, 1000);
-    
-    // Re-ping every 5 seconds
     const interval = setInterval(measurePing, 5000);
 
     return () => {
@@ -150,19 +145,15 @@ const Room = () => {
     });
   };
 
-  // Generate a unique name by adding a number suffix with a space if there's a conflict
+  // Generate a unique name by adding a number suffix if there's a conflict
   const generateUniqueName = (baseName: string, existingUsers: RoomUser[]): string => {
-    // Always store the comparison name in formatted form (first capital, rest lowercase)
     const normalizedBase = baseName.trim().toLowerCase();
     const existingNames = existingUsers.map(u => u.name.trim().toLowerCase());
     
-    // Check if base name already exists
     if (!existingNames.includes(normalizedBase)) {
       return baseName;
     }
     
-    // Try adding numbers at the end with a space until we find a unique one
-    // e.g., "Alex" becomes "Alex 1", "Alex 2", etc.
     for (let i = 1; i <= 999; i++) {
       const candidate = baseName + " " + i;
       if (!existingNames.includes(candidate.toLowerCase())) {
@@ -170,7 +161,6 @@ const Room = () => {
       }
     }
     
-    // Fallback: add timestamp suffix
     return baseName + " " + Date.now();
   };
 
@@ -178,17 +168,13 @@ const Room = () => {
   useEffect(() => {
     if (!roomCode) return;
 
-    // A deterministic peer ID for the host so others can join, and random for listeners
     const generatedId = isHost 
       ? `meoww-room-${roomCode.toLowerCase()}` 
       : `meoww-user-${roomCode.toLowerCase()}-${Math.random().toString(36).substring(2, 7)}`;
     
     setMyId(generatedId);
 
-    // Generate unique name if needed (only for non-hosts joining)
     const finalName = isHost ? userName : generateUniqueName(userName, []);
-    
-    // Update the displayed name if it changed
     if (finalName !== userName) {
       setUserName(finalName);
     }
@@ -202,8 +188,16 @@ const Room = () => {
 
     setUsers([currentUser]);
 
+    // Configure PeerJS with better connection settings
     const peer = new Peer(generatedId, {
       debug: 1,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+        sdpSemantics: 'unified',
+      },
     });
     peerRef.current = peer;
 
@@ -211,7 +205,6 @@ const Room = () => {
       setIsConnected(true);
       
       if (!isHost) {
-        // Connect to host peer
         const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
         const conn = peer.connect(hostPeerId, { reliable: true });
         setupConnection(conn, currentUser);
@@ -223,10 +216,16 @@ const Room = () => {
     });
 
     peer.on("error", (err: any) => {
-      console.warn("PeerJS error:", err);
+      console.warn("PeerJS error:", err.type, err.message);
       if (err.type === "unavailable-id" && isHost) {
         toast.error("Room host already active. Joining as listener.");
         setIsHost(false);
+      } else if (err.type === "peer-unavailable") {
+        toast.error("Room not found. Please check the code.");
+      } else if (err.type === "network" || err.type === "server-error") {
+        toast.error("Connection issues. Check your internet connection.");
+      } else if (err.type === "browser-incompatible") {
+        toast.error("Your browser doesn't support WebRTC.");
       } else {
         toast.error("Connection notice: " + (err.message || "Working in local mode."));
       }
@@ -240,70 +239,26 @@ const Room = () => {
   // Connection data handler
   const setupConnection = (conn: DataConnection, me: RoomUser) => {
     conn.on("open", () => {
-      // If this connection is from a listener trying to join the host
       if (isHostRef.current) {
-        // Check for duplicate name (case-insensitive) and generate unique name
         const uniqueName = generateUniqueName(me.name, usersRef.current);
         const updatedUser = { ...me, name: uniqueName };
 
-        // If name was changed, notify the user
+        connectionsRef.current.set(conn.peer, conn);
+
+        conn.send({
+          type: "JOIN",
+          user: updatedUser,
+        });
+        
         if (uniqueName !== me.name) {
-          // Send the updated user info with the new name
-          connectionsRef.current.set(conn.peer, conn);
-          
-          // Send JOIN with the unique name
-          conn.send({
-            type: "JOIN",
-            user: updatedUser,
-          });
-          
-          // Send notification to the user about their new name
           conn.send({
             type: "NAME_UPDATE",
             newName: uniqueName,
             originalName: me.name,
           });
-          
-          return;
-        }
-
-        connectionsRef.current.set(conn.peer, conn);
-
-        // If listener connecting to host, announce self
-        conn.send({
-          type: "JOIN",
-          user: me,
-        });
-
-        // If host, send current state to the new listener
-        if (isHostRef.current) {
-          const audio = audioRef.current;
-          const currentSeek = audio ? audio.currentTime : 0;
-          
-          conn.send({
-            type: "USER_LIST",
-            users: [...usersRef.current, { id: conn.peer, name: "Connecting...", isHost: false, joinedAt: Date.now() }],
-          });
-
-          conn.send({
-            type: "UPDATE_QUEUE",
-            queue: queueRef.current,
-            activeIndex: currentIndexRef.current,
-          });
-
-          if (audio && !audio.paused) {
-            conn.send({
-              type: "PLAY",
-              trackIndex: currentIndexRef.current,
-              seekTime: currentSeek,
-              timestamp: Date.now(),
-            });
-          }
         }
       } else {
         connectionsRef.current.set(conn.peer, conn);
-        
-        // If listener connecting to host, announce self
         conn.send({
           type: "JOIN",
           user: me,
@@ -319,20 +274,22 @@ const Room = () => {
       connectionsRef.current.delete(conn.peer);
       handlePeerDisconnect(conn.peer);
     });
+
+    conn.on("error", (err: any) => {
+      console.warn("Connection error:", err);
+    });
   };
 
   // Handle incoming protocol messages
   const handleIncomingMessage = (msg: SyncMessage, senderPeerId: string) => {
     switch (msg.type) {
       case "NAME_UPDATE": {
-        // Update our displayed name if the host assigned us a new one
         setUserName(msg.newName);
         toast.info(`Your name was updated to "${msg.newName}" because "${msg.originalName}" was taken.`);
         break;
       }
 
       case "JOIN": {
-        // If we're the host, do a final duplicate check before adding
         if (isHostRef.current) {
           const uniqueName = generateUniqueName(msg.user.name, usersRef.current);
           const updatedUser = { ...msg.user, name: uniqueName };
@@ -342,7 +299,6 @@ const Room = () => {
           setUsers(updatedUsers);
           
           if (uniqueName !== msg.user.name) {
-            // Notify the user about the name change
             const conn = connectionsRef.current.get(senderPeerId);
             if (conn && conn.open) {
               conn.send({
@@ -388,7 +344,6 @@ const Room = () => {
         const audio = audioRef.current;
         if (!audio) return;
 
-        // Millisecond accurate sync compensation
         const latencySec = (Date.now() - msg.timestamp) / 1000;
         const targetTime = msg.seekTime + latencySec;
 
@@ -401,7 +356,7 @@ const Room = () => {
         }
 
         audio.play().then(() => setIsPlaying(true)).catch((e) => {
-          console.log("Auto-play blocked, user click needed:", e);
+          console.log("Auto-play blocked:", e);
         });
         break;
       }
@@ -448,14 +403,12 @@ const Room = () => {
     }
   };
 
-  // If host leaves, automatic host failover to the next joined user
   const handlePeerDisconnect = (disconnectedId: string) => {
     const remainingUsers = usersRef.current.filter((u) => u.id !== disconnectedId);
     setUsers(remainingUsers);
 
     const wasHost = usersRef.current.find((u) => u.id === disconnectedId)?.isHost;
     if (wasHost && remainingUsers.length > 0) {
-      // Pick the next earliest joined participant
       const sorted = [...remainingUsers].sort((a, b) => a.joinedAt - b.joinedAt);
       const nextHost = sorted[0];
 
@@ -470,7 +423,6 @@ const Room = () => {
     }
   };
 
-  // Playback audio element controls
   const handleTogglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -589,7 +541,6 @@ const Room = () => {
     toast.success("Track added to queue!");
   };
 
-  // Upload local MP3 file (for user's test.mp3 or local music)
   const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -626,7 +577,6 @@ const Room = () => {
     newQueue[idx] = newQueue[targetIdx];
     newQueue[targetIdx] = temp;
 
-    // update active index if needed
     let newActive = currentIndex;
     if (currentIndex === idx) {
       newActive = targetIdx;
@@ -832,7 +782,7 @@ const Room = () => {
 
           {/* Quick instructions for uploading own file / github tracks */}
           <div className="border border-gray-300 p-4 bg-gray-50 text-xs font-mono text-gray-600 space-y-1.5">
-            <p className="font-bold text-black uppercase">🎧 Tip for your own music:</p>
+            <p className="font-bold text-black uppercase">Tip for your own music:</p>
             <p>You can add any MP3 link from GitHub, or upload your local test.mp3 file directly using the "Add Track" button.</p>
           </div>
         </div>
@@ -1061,7 +1011,7 @@ const Room = () => {
 
       {/* Bottom status strip */}
       <footer className="border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400 font-mono relative z-20">
-        Meoww &bull; Monochromatic Audio Streamer
+        Meoww - Monochromatic Audio Streamer
       </footer>
     </div>
   );
