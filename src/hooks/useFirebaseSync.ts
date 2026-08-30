@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import FirebaseSignaling, { FirebaseSyncState } from "@/lib/firebaseSignaling";
-import { Track, RoomUser, SyncMessage } from "@/types/music";
+import { Track, SyncMessage } from "@/types/music";
 
 interface UseFirebaseSyncOptions {
   roomCode: string;
@@ -86,6 +86,5 @@ export function useFirebaseSync({
     isConnected,
     broadcast,
     getUsers,
-    signalingRef,
   };
 }

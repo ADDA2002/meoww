@@ -13,11 +13,6 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate }: UseAudioPlayerOp
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const isPlayingRef = useRef(false);
-  const currentTimeRef = useRef(0);
-
-  isPlayingRef.current = isPlaying;
-  currentTimeRef.current = currentTime;
 
   // Initialize audio element
   useEffect(() => {
@@ -85,7 +80,6 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate }: UseAudioPlayerOp
   }, []);
 
   return {
-    audioRef,
     isPlaying,
     setIsPlaying,
     isMuted,
@@ -96,7 +90,5 @@ export function useAudioPlayer({ track, isHost, onTimeUpdate }: UseAudioPlayerOp
     pause,
     seek,
     getCurrentTime,
-    isPlayingRef,
-    currentTimeRef,
   };
 }

@@ -28,7 +28,7 @@ const Room = () => {
 
   // User states
   const [myId, setMyId] = useState<string>("");
-  const [userName, setUserName] = useState<string>(initialName);
+  const [userName] = useState<string>(initialName);
   const [isHost, setIsHost] = useState<boolean>(initialIsHost);
   const [users, setUsers] = useState<RoomUser[]>([]);
 
@@ -39,11 +39,9 @@ const Room = () => {
 
   // Sync refs
   const isHostRef = useRef(isHost);
-  const queueRef = useRef(queue);
   const currentIndexRef = useRef(currentIndex);
 
   isHostRef.current = isHost;
-  queueRef.current = queue;
   currentIndexRef.current = currentIndex;
 
   const currentTrack = queue[currentIndex] || null;
@@ -51,7 +49,6 @@ const Room = () => {
   // Audio player hook
   const {
     isPlaying,
-    setIsPlaying,
     isMuted,
     setIsMuted,
     currentTime,
@@ -60,7 +57,6 @@ const Room = () => {
     pause,
     seek,
     getCurrentTime,
-    isPlayingRef,
   } = useAudioPlayer({
     track: currentTrack,
     isHost,
@@ -151,7 +147,7 @@ const Room = () => {
         setUsers(userList);
       }
     });
-  }, [isConnected, myId]);
+  }, [isConnected, myId, getUsers]);
 
   // Playback controls
   const handleTogglePlay = useCallback(() => {

@@ -2,9 +2,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
-import Header from "@/components/Header";
+import { useNavigate } from "react-router-dom";
 
 const CreateRoom = () => {
+  const navigate = useNavigate();
   const [roomName, setRoomName] = useState("");
   const [roomCode, setRoomCode] = useState<string | null>(null);
 
@@ -17,7 +18,6 @@ const CreateRoom = () => {
 
   return (
     <div className="min-h-screen bg-white text-black py-12 px-4 sm:px-6 lg:px-8">
-      <Header />
       <div className="max-w-md mx-auto space-y-8">
         <div className="text-center">
           <h1 className="text-3xl font-bold mb-4 text-black">Create a Room</h1>
