@@ -58,7 +58,6 @@ const Room = () => {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [ping, setPing] = useState<number>(0);
-  const [syncStatus, setSyncStatus] = useState<"synced" | "buffering" | "offline">("synced");
 
   const [addSongOpen, setAddSongOpen] = useState(false);
   const [songTitle, setSongTitle] = useState("");
@@ -70,26 +69,19 @@ const Room = () => {
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   
-  // Sync state refs
+  // Refs that track state for use in closures
+  const usersRef = useRef<RoomUser[]>([]);
+  const queueRef = useRef<Track[]>(queue);
   const isHostRef = useRef<boolean>(isHost);
   const currentIndexRef = useRef<number>(currentIndex);
   const isPlayingRef = useRef<boolean>(isPlaying);
-  const usersRef = useRef<RoomUser[]>([]);
-  const queueRef = useRef<Track[]>(queue);
-  
-  // The wall-clock timestamp at which playback should be in sync
-  // null = no scheduled playback
-  const syncEpochRef = useRef<number | null>(null);
-  // The position in the track at syncEpoch
-  const syncOffsetRef = useRef<number>(0);
-  // Drift correction interval
-  const driftCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Keep refs in sync with state
+  useEffect(() => { usersRef.current = users; }, [users]);
+  useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
-  useEffect(() => { usersRef.current = users; }, [users]);
-  useEffect(() => { queueRef.current = queue; }, [queue]);
 
   const currentTrack = queue[currentIndex] || null;
 
@@ -102,62 +94,6 @@ const Room = () => {
     }
   }, [isMuted]);
 
-  // ============= SYNC CLOCK - The heart of millisecond sync =============
-  
-  /**
-   * Calculates the current playback position based on the sync epoch.
-   * This is the SHARED CLOCK all clients agree on.
-   * 
-   * If we're playing and sync started at time T with offset O,
-   * then current position = (Date.now() - T) / 1000 + O
-   */
-  const getSyncedPosition = useCallback((): number => {
-    if (syncEpochRef.current === null) {
-      return audioRef.current?.currentTime ?? 0;
-    }
-    return (Date.now() - syncEpochRef.current) / 1000 + syncOffsetRef.current;
-  }, []);
-
-  // Drift correction - constantly nudge audio to stay in sync
-  useEffect(() => {
-    if (driftCheckRef.current) {
-      clearInterval(driftCheckRef.current);
-    }
-
-    driftCheckRef.current = setInterval(() => {
-      const audio = audioRef.current;
-      if (!audio || !isPlayingRef.current || syncEpochRef.current === null) return;
-
-      const expected = getSyncedPosition();
-      const actual = audio.currentTime;
-      const drift = expected - actual;
-
-      // Only correct if drift is significant (> 100ms)
-      // Smaller drift is imperceptible to human ear
-      if (Math.abs(drift) > 0.1) {
-        console.log(`[SYNC] Drift: ${(drift * 1000).toFixed(0)}ms, correcting...`);
-        audio.currentTime = expected;
-        setCurrentTime(expected);
-      }
-    }, 2000); // Check every 2 seconds
-
-    return () => {
-      if (driftCheckRef.current) {
-        clearInterval(driftCheckRef.current);
-      }
-    };
-  }, [getSyncedPosition]);
-
-  // Update display time continuously
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (isPlayingRef.current && syncEpochRef.current !== null) {
-        setCurrentTime(getSyncedPosition());
-      }
-    }, 100);
-    return () => clearInterval(interval);
-  }, [getSyncedPosition]);
-
   // Ping measurement
   useEffect(() => {
     if (isHost) return;
@@ -165,13 +101,13 @@ const Room = () => {
     const measurePing = () => {
       const hostPeerId = `meoww-room-${roomCode.toLowerCase()}`;
       const testPeer = new Peer(`${myId}-ping-${Date.now()}`, { debug: 0 });
-      const startTime = Date.now();
 
       const timeout = setTimeout(() => {
         try { testPeer.destroy(); } catch (e) { /* noop */ }
       }, 3000);
 
       testPeer.on("open", () => {
+        const startTime = Date.now();
         const conn = testPeer.connect(hostPeerId, { reliable: true });
 
         conn.on("open", () => {
@@ -286,114 +222,56 @@ const Room = () => {
     return baseName + " " + Date.now();
   };
 
+  // ============= AUDIO PLAYBACK (CORE SYNC LOGIC) =============
+  
   /**
-   * Schedule audio to start playing at a specific wall-clock time.
-   * This is the key to synced playback across high-latency networks.
+   * Plays audio at a specific target time with proper sync.
+   * This is the main function used by both host actions and listener sync.
    * 
-   * @param epochMs - The Date.now() timestamp at which playback should be at offsetSec
-   * @param offsetSec - The position in the track at epochMs
-   * @param trackIndex - Which track to play
+   * @param targetTime - The exact time in seconds to seek to
+   * @param trackIndex - Which track to play (optional, for track changes)
    */
-  const schedulePlayAt = useCallback((epochMs: number, offsetSec: number, trackIndex: number) => {
+  const playAudioAt = useCallback((targetTime: number, trackIndex?: number) => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    console.log(`[SYNC] Scheduling play: epoch=${epochMs}, offset=${offsetSec}s, track=${trackIndex}`);
-    setSyncStatus("buffering");
-
-    // Update state if track changed
-    if (currentIndexRef.current !== trackIndex) {
+    // If we're changing to a different track
+    if (trackIndex !== undefined && trackIndex !== currentIndexRef.current) {
+      // Update state will trigger re-render which updates audio.src
       setCurrentIndex(trackIndex);
     }
 
-    // Set the sync epoch
-    syncEpochRef.current = epochMs;
-    syncOffsetRef.current = offsetSec;
-
-    // How long until we need to start playing (in ms)
-    const now = Date.now();
-    const waitMs = epochMs - now;
-
-    // Wait for audio to be ready, then schedule playback
-    const startPlayback = () => {
-      // Calculate exact position to seek to
-      const targetPosition = offsetSec;
+    // Wait for audio to be ready, then seek and play
+    const playWhenReady = () => {
+      // Remove this listener
+      audio.removeEventListener('canplay', playWhenReady);
       
-      console.log(`[SYNC] Audio ready, seeking to ${targetPosition}s, will play in ${waitMs}ms`);
+      // Calculate how far we need to seek
+      const currentPos = audio.currentTime;
+      const drift = targetTime - currentPos;
       
-      // Seek to position
-      audio.currentTime = targetPosition;
-      
-      // Schedule play to begin exactly at epoch
-      if (waitMs > 0) {
-        // We're early - wait then play
-        setTimeout(() => {
-          if (syncEpochRef.current === epochMs) {
-            audio.play().then(() => {
-              setIsPlaying(true);
-              setSyncStatus("synced");
-              console.log(`[SYNC] Playback started at scheduled time`);
-            }).catch((e) => {
-              console.error("Play failed:", e);
-              toast.error("Auto-play blocked. Click play to start.");
-              setSyncStatus("offline");
-            });
-          }
-        }, waitMs);
-      } else {
-        // We're late - play immediately
-        audio.play().then(() => {
-          setIsPlaying(true);
-          setSyncStatus("synced");
-        }).catch((e) => {
-          console.error("Play failed:", e);
-          setSyncStatus("offline");
-        });
+      // Only seek if drift is significant (> 50ms)
+      if (Math.abs(drift) > 0.05) {
+        audio.currentTime = targetTime;
       }
+      
+      // Play and update state
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch((e) => {
+        console.log("Play blocked:", e);
+      });
     };
 
-    // Check if audio is ready
-    if (audio.readyState >= 3) {
-      startPlayback();
+    // Check if audio is already ready to play
+    if (audio.readyState >= 3) { // HAVE_FUTURE_DATA
+      playWhenReady();
     } else {
-      const onCanPlay = () => {
-        audio.removeEventListener('canplay', onCanPlay);
-        startPlayback();
-      };
-      audio.addEventListener('canplay', onCanPlay);
+      // Wait for canplay event
+      audio.addEventListener('canplay', playWhenReady);
       audio.load();
     }
-  }, []);
-
-  /**
-   * Schedule pause at a specific wall-clock time
-   */
-  const schedulePauseAt = useCallback((epochMs: number, positionSec: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const now = Date.now();
-    const waitMs = epochMs - now;
-
-    // Clear sync epoch
-    syncEpochRef.current = null;
-
-    if (waitMs > 0) {
-      setTimeout(() => {
-        if (syncEpochRef.current === null) {
-          audio.pause();
-          audio.currentTime = positionSec;
-          setIsPlaying(false);
-          setCurrentTime(positionSec);
-        }
-      }, waitMs);
-    } else {
-      audio.pause();
-      audio.currentTime = positionSec;
-      setIsPlaying(false);
-      setCurrentTime(positionSec);
-    }
-  }, []);
+  }, []); // No dependencies - this function uses refs
 
   // ============= PLAYBACK CONTROLS (HOST ACTIONS) =============
 
@@ -401,28 +279,31 @@ const Room = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
+    const now = Date.now();
+
     if (isPlayingRef.current) {
-      // PAUSE - schedule pause 200ms in future so listeners can receive the command
-      const futureEpoch = Date.now() + 200;
-      const currentPos = audio.currentTime;
-      schedulePauseAt(futureEpoch, currentPos);
+      // PAUSE
+      audio.pause();
+      setIsPlaying(false);
       
       broadcast({
         type: "PAUSE",
-        epoch: futureEpoch,
-        position: currentPos,
+        seekTime: audio.currentTime,
       });
     } else {
-      // PLAY - schedule play 500ms in future to give all clients time to load
-      const futureEpoch = Date.now() + 500;
-      const currentPos = audio.currentTime;
-      schedulePlayAt(futureEpoch, currentPos, currentIndexRef.current);
-      
-      broadcast({
-        type: "PLAY",
-        epoch: futureEpoch,
-        position: currentPos,
-        trackIndex: currentIndexRef.current,
+      // PLAY - play at current position immediately
+      audio.play().then(() => {
+        setIsPlaying(true);
+        
+        broadcast({
+          type: "PLAY",
+          trackIndex: currentIndexRef.current,
+          seekTime: audio.currentTime,
+          timestamp: Date.now(),
+        });
+      }).catch((err) => {
+        console.error("Play failed:", err);
+        toast.error("Couldn't play this track.");
       });
     }
   };
@@ -437,16 +318,35 @@ const Room = () => {
       nextIdx = (currentIndex + 1) % queue.length;
     }
 
-    // Schedule new track to start 800ms in future (extra time for track change)
-    const futureEpoch = Date.now() + 800;
-    schedulePlayAt(futureEpoch, 0, nextIdx);
-    
-    broadcast({
-      type: "PLAY",
-      epoch: futureEpoch,
-      position: 0,
-      trackIndex: nextIdx,
-    });
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // Play new track from beginning, broadcast to listeners
+    const playWhenReady = () => {
+      audio.removeEventListener('canplay', playWhenReady);
+      audio.currentTime = 0;
+      
+      audio.play().then(() => {
+        setIsPlaying(true);
+        
+        broadcast({
+          type: "PLAY",
+          trackIndex: nextIdx,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
+    };
+
+    setCurrentIndex(nextIdx);
+
+    // Wait for new audio source to be ready
+    if (audio.readyState >= 3) {
+      playWhenReady();
+    } else {
+      audio.addEventListener('canplay', playWhenReady);
+      audio.load();
+    }
   };
 
   const handlePrevious = () => {
@@ -459,15 +359,33 @@ const Room = () => {
       prevIdx = (currentIndex - 1 + queue.length) % queue.length;
     }
 
-    const futureEpoch = Date.now() + 800;
-    schedulePlayAt(futureEpoch, 0, prevIdx);
-    
-    broadcast({
-      type: "PLAY",
-      epoch: futureEpoch,
-      position: 0,
-      trackIndex: prevIdx,
-    });
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const playWhenReady = () => {
+      audio.removeEventListener('canplay', playWhenReady);
+      audio.currentTime = 0;
+      
+      audio.play().then(() => {
+        setIsPlaying(true);
+        
+        broadcast({
+          type: "PLAY",
+          trackIndex: prevIdx,
+          seekTime: 0,
+          timestamp: Date.now(),
+        });
+      }).catch(console.error);
+    };
+
+    setCurrentIndex(prevIdx);
+
+    if (audio.readyState >= 3) {
+      playWhenReady();
+    } else {
+      audio.addEventListener('canplay', playWhenReady);
+      audio.load();
+    }
   };
 
   const handleToggleShuffle = () => {
@@ -483,23 +401,77 @@ const Room = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (isPlayingRef.current) {
-      // Seek to new position and resync epoch
-      const futureEpoch = Date.now() + 300;
-      schedulePlayAt(futureEpoch, targetTime, currentIndexRef.current);
-      
-      broadcast({
-        type: "SEEK",
-        epoch: futureEpoch,
-        position: targetTime,
-        trackIndex: currentIndexRef.current,
-      });
-    } else {
-      audio.currentTime = targetTime;
-      setCurrentTime(targetTime);
-      syncEpochRef.current = null;
-      syncOffsetRef.current = targetTime;
+    audio.currentTime = targetTime;
+    setCurrentTime(targetTime);
+    
+    broadcast({
+      type: "SEEK",
+      seekTime: targetTime,
+      timestamp: Date.now(),
+    });
+  };
+
+  // ============= SYNC HANDLERS (LISTENER RECEIVES) =============
+
+  const handleSyncPlay = (msg: { trackIndex: number; seekTime: number; timestamp: number }) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // Calculate exact time accounting for network latency
+    // This is the key to millisecond sync:
+    // - msg.seekTime is where the audio WAS on host's machine
+    // - msg.timestamp is when host sent this message
+    // - We calculate how much time passed since then and add to seekTime
+    const elapsedMs = Date.now() - msg.timestamp;
+    const targetTime = msg.seekTime + (elapsedMs / 1000);
+
+    // If track changed, update state (this updates audio.src)
+    if (msg.trackIndex !== currentIndexRef.current) {
+      setCurrentIndex(msg.trackIndex);
     }
+
+    // Wait for audio to be ready, then seek to exact time and play
+    const playWhenReady = () => {
+      audio.removeEventListener('canplay', playWhenReady);
+      
+      // Seek to exact calculated time
+      audio.currentTime = targetTime;
+      
+      // Play
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch((e) => {
+        console.log("Auto-play blocked:", e);
+      });
+    };
+
+    if (audio.readyState >= 3) {
+      playWhenReady();
+    } else {
+      audio.addEventListener('canplay', playWhenReady);
+      audio.load();
+    }
+  };
+
+  const handleSyncPause = (msg: { seekTime: number }) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.pause();
+    audio.currentTime = msg.seekTime;
+    setIsPlaying(false);
+  };
+
+  const handleSyncSeek = (msg: { seekTime: number; timestamp: number }) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // Apply same latency compensation for seeks
+    const elapsedMs = Date.now() - msg.timestamp;
+    const targetTime = msg.seekTime + (elapsedMs / 1000);
+    
+    audio.currentTime = targetTime;
+    setCurrentTime(targetTime);
   };
 
   // ============= CONNECTION HANDLING =============
@@ -517,6 +489,9 @@ const Room = () => {
           user: updatedUser,
         });
 
+        const audio = audioRef.current;
+        const currentSeek = audio ? audio.currentTime : 0;
+
         conn.send({
           type: "USER_LIST",
           users: [...usersRef.current, updatedUser],
@@ -528,13 +503,12 @@ const Room = () => {
           activeIndex: currentIndexRef.current,
         });
 
-        // If currently playing, send current playback state
-        if (isPlayingRef.current && syncEpochRef.current !== null) {
+        if (audio && !audio.paused) {
           conn.send({
             type: "PLAY",
-            epoch: syncEpochRef.current,
-            position: syncOffsetRef.current,
             trackIndex: currentIndexRef.current,
+            seekTime: currentSeek,
+            timestamp: Date.now(),
           });
         }
 
@@ -608,17 +582,17 @@ const Room = () => {
       }
 
       case "PLAY": {
-        schedulePlayAt(msg.epoch, msg.position, msg.trackIndex);
+        handleSyncPlay(msg);
         break;
       }
 
       case "PAUSE": {
-        schedulePauseAt(msg.epoch, msg.position);
+        handleSyncPause(msg);
         break;
       }
 
       case "SEEK": {
-        schedulePlayAt(msg.epoch, msg.position, msg.trackIndex);
+        handleSyncSeek(msg);
         break;
       }
 
@@ -817,12 +791,9 @@ const Room = () => {
             {/* Status Bar */}
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 text-xs font-mono">
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 ${
-                  syncStatus === "synced" ? "bg-green-500" : 
-                  syncStatus === "buffering" ? "bg-yellow-500" : "bg-red-500"
-                } animate-pulse`}></span>
+                <span className={`w-2 h-2 ${isConnected ? "bg-black" : "bg-red-500"} animate-pulse`}></span>
                 <span className="font-semibold text-gray-700 uppercase">
-                  {isHost ? "YOU ARE HOST" : `LISTENER ${syncStatus.toUpperCase()}`}
+                  {isHost ? "YOU ARE HOST" : "LISTENER MODE (SYNCED)"}
                 </span>
               </div>
               <div className="flex items-center gap-1 text-gray-500">
@@ -939,9 +910,6 @@ const Room = () => {
           <div className="border border-gray-300 p-4 bg-gray-50 text-xs font-mono text-gray-600 space-y-1.5">
             <p className="font-bold text-black uppercase">🎧 Tip for your own music:</p>
             <p>You can add any MP3 link from GitHub, or upload your local test.mp3 file directly using the "Add Track" button.</p>
-            {ping > 200 && (
-              <p className="text-orange-600 font-bold mt-2">⚠️ High latency detected ({ping}ms). Sync may have small drift.</p>
-            )}
           </div>
         </div>
 
@@ -1084,15 +1052,31 @@ const Room = () => {
                     <div
                       onClick={() => {
                         if (isHost) {
-                          const futureEpoch = Date.now() + 800;
-                          schedulePlayAt(futureEpoch, 0, idx);
-                          
-                          broadcast({
-                            type: "PLAY",
-                            epoch: futureEpoch,
-                            position: 0,
-                            trackIndex: idx,
-                          });
+                          const audio = audioRef.current;
+                          if (!audio) return;
+
+                          const playWhenReady = () => {
+                            audio.removeEventListener('canplay', playWhenReady);
+                            audio.currentTime = 0;
+                            audio.play().then(() => {
+                              setIsPlaying(true);
+                              broadcast({
+                                type: "PLAY",
+                                trackIndex: idx,
+                                seekTime: 0,
+                                timestamp: Date.now(),
+                              });
+                            }).catch(console.error);
+                          };
+
+                          setCurrentIndex(idx);
+
+                          if (audio.readyState >= 3) {
+                            playWhenReady();
+                          } else {
+                            audio.addEventListener('canplay', playWhenReady);
+                            audio.load();
+                          }
                         }
                       }}
                       className="min-w-0 flex-1 cursor-pointer"
@@ -1152,8 +1136,7 @@ const Room = () => {
         ref={audioRef}
         src={currentTrack?.url}
         onTimeUpdate={() => {
-          // Only update from audio element if not in sync mode
-          if (syncEpochRef.current === null && audioRef.current) {
+          if (audioRef.current) {
             setCurrentTime(audioRef.current.currentTime);
           }
         }}
