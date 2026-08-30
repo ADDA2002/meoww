@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload } from "lucide-react";
+import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  type DropResult,
+} from "@hello-pangea/dnd";
 import { Track } from "@/types/music";
 
 interface RoomDrawerProps {
@@ -29,6 +35,7 @@ interface RoomDrawerProps {
   onLeave: () => void;
   onTrackClick?: (idx: number) => void;
   onReorder?: (idx: number, direction: "up" | "down") => void;
+  onReorderDnd?: (fromIdx: number, toIdx: number) => void;
   onRemove?: (idx: number) => void;
   onAddSong?: (song: { title: string; artist: string; url: string }) => void;
   onLocalFileUpload?: (file: File) => void;
@@ -43,6 +50,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
   onLeave,
   onTrackClick,
   onReorder,
+  onReorderDnd,
   onRemove,
   onAddSong,
   onLocalFileUpload,
@@ -68,7 +76,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
   const handleAddSong = (e: React.FormEvent) => {
     e.preventDefault();
     if (!songTitle.trim() || !songUrl.trim()) return;
-    
+
     onAddSong?.({ title: songTitle, artist: songArtist, url: songUrl });
     setSongTitle("");
     setSongArtist("");
@@ -84,6 +92,13 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     }
   };
 
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    if (!isHost || !onReorderDnd) return;
+    if (result.destination.index === result.source.index) return;
+    onReorderDnd(result.source.index, result.destination.index);
+  };
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
@@ -96,7 +111,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
           <Menu className="w-4 h-4" />
         </Button>
       </SheetTrigger>
-      <SheetContent 
+      <SheetContent
         className="border-l border-black bg-white text-black rounded-none p-0 [&>button]:hidden w-full sm:max-w-md"
       >
         <SheetHeader className="border-b border-gray-200 px-6 py-4 text-left flex-row items-center justify-between">
@@ -105,7 +120,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
             <X className="w-5 h-5" />
           </SheetClose>
         </SheetHeader>
-        
+
         <div className="p-6 space-y-6 max-h-[calc(100vh-80px)] overflow-y-auto">
           {/* Room Code Section */}
           <div className="space-y-3">
@@ -193,30 +208,113 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                 </Dialog>
               )}
             </div>
-            
-            <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
-              {queue.length === 0 ? (
-                <div className="p-4 border border-dashed border-gray-300 text-center text-gray-400 text-xs font-mono">
-                  <Music className="w-6 h-6 mx-auto mb-2" />
-                  No songs in queue
-                </div>
-              ) : (
-                queue.map((track, idx) => {
-                  const isCurrent = idx === currentIndex;
-                  return (
+
+            {isHost && onReorderDnd ? (
+              <DragDropContext onDragEnd={handleDragEnd}>
+                <Droppable droppableId="playlist">
+                  {(provided) => (
                     <div
-                      key={track.id}
-                      className={`p-2.5 border transition-colors ${
-                        isCurrent ? "bg-black text-white border-black" : "bg-white text-black border-gray-200"
-                      }`}
+                      {...provided.droppableProps}
+                      ref={provided.innerRef}
+                      className="space-y-1.5 max-h-80 overflow-y-auto pr-1"
                     >
-                      <p className="font-bold text-xs truncate">{idx + 1}. {track.title}</p>
-                      <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>{track.artist}</p>
+                      {queue.length === 0 ? (
+                        <div className="p-4 border border-dashed border-gray-300 text-center text-gray-400 text-xs font-mono">
+                          <Music className="w-6 h-6 mx-auto mb-2" />
+                          No songs in queue
+                        </div>
+                      ) : (
+                        queue.map((track, idx) => {
+                          const isCurrent = idx === currentIndex;
+                          return (
+                            <Draggable key={track.id} draggableId={track.id} index={idx}>
+                              {(provided, snapshot) => (
+                                <div
+                                  ref={provided.innerRef}
+                                  {...provided.draggableProps}
+                                  className={`p-2.5 border transition-colors flex items-center gap-2 ${
+                                    isCurrent
+                                      ? "bg-black text-white border-black"
+                                      : "bg-white text-black border-gray-200"
+                                  } ${snapshot.isDragging ? "shadow-lg" : ""}`}
+                                >
+                                  <span
+                                    {...provided.dragHandleProps}
+                                    className={`cursor-grab active:cursor-grabbing flex-shrink-0 ${
+                                      isCurrent ? "text-gray-300" : "text-gray-400"
+                                    }`}
+                                  >
+                                    <GripVertical className="w-4 h-4" />
+                                  </span>
+                                  <div
+                                    className="flex-1 min-w-0 cursor-pointer"
+                                    onClick={() => onTrackClick?.(idx)}
+                                  >
+                                    <p className="font-bold text-xs truncate">
+                                      {idx + 1}. {track.title}
+                                    </p>
+                                    <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>
+                                      {track.artist}
+                                    </p>
+                                  </div>
+                                  {onRemove && (
+                                    <button
+                                      onClick={() => onRemove(idx)}
+                                      className={`flex-shrink-0 p-1 transition-colors ${
+                                        isCurrent ? "text-gray-300 hover:text-white" : "text-gray-400 hover:text-black"
+                                      }`}
+                                      aria-label="Remove from queue"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </Draggable>
+                          );
+                        })
+                      )}
+                      {provided.placeholder}
                     </div>
-                  );
-                })
-              )}
-            </div>
+                  )}
+                </Droppable>
+              </DragDropContext>
+            ) : (
+              <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+                {queue.length === 0 ? (
+                  <div className="p-4 border border-dashed border-gray-300 text-center text-gray-400 text-xs font-mono">
+                    <Music className="w-6 h-6 mx-auto mb-2" />
+                    No songs in queue
+                  </div>
+                ) : (
+                  queue.map((track, idx) => {
+                    const isCurrent = idx === currentIndex;
+                    return (
+                      <div
+                        key={track.id}
+                        className={`p-2.5 border transition-colors ${
+                          isCurrent ? "bg-black text-white border-black" : "bg-white text-black border-gray-200"
+                        }`}
+                      >
+                        <p className="font-bold text-xs truncate">{idx + 1}. {track.title}</p>
+                        <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>{track.artist}</p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+
+            {isHost && queue.length > 0 && onReorder && !onReorderDnd && (
+              <p className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">
+                Use the arrows to reorder tracks
+              </p>
+            )}
+            {isHost && onReorderDnd && (
+              <p className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">
+                Drag the grip handle to reorder
+              </p>
+            )}
           </div>
 
           {/* Exit Button */}

@@ -61,7 +61,6 @@ const Room = () => {
       audio.load();
     }
 
-    // Wait for audio to be ready before playing
     const handleCanPlay = () => {
       audio.removeEventListener("canplay", handleCanPlay);
       audio.play().catch(console.error);
@@ -281,18 +280,20 @@ const Room = () => {
     });
   }, [userName]);
 
-  // Reorder queue (host only)
-  const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
-    if (direction === "up" && idx === 0) return;
-    if (direction === "down" && idx === queueRef.current.length - 1) return;
-
-    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+  // Reorder queue by drag-and-drop (host only)
+  const handleReorderDnd = useCallback((fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
     const newQueue = [...queueRef.current];
-    [newQueue[idx], newQueue[targetIdx]] = [newQueue[targetIdx], newQueue[idx]];
+    const [moved] = newQueue.splice(fromIdx, 1);
+    newQueue.splice(toIdx, 0, moved);
 
     let newActive = currentIndexRef.current;
-    if (currentIndexRef.current === idx) newActive = targetIdx;
-    else if (currentIndexRef.current === targetIdx) newActive = idx;
+    if (currentIndexRef.current === fromIdx) newActive = toIdx;
+    else if (fromIdx < currentIndexRef.current && toIdx >= currentIndexRef.current) {
+      newActive = currentIndexRef.current - 1;
+    } else if (fromIdx > currentIndexRef.current && toIdx <= currentIndexRef.current) {
+      newActive = currentIndexRef.current + 1;
+    }
 
     setQueue(newQueue);
     setCurrentIndex(newActive);
@@ -302,6 +303,15 @@ const Room = () => {
       currentTrackIndex: newActive,
     });
   }, []);
+
+  // Reorder queue (host only) — used by the older arrow-style fallback if needed
+  const handleReorder = useCallback((idx: number, direction: "up" | "down") => {
+    if (direction === "up" && idx === 0) return;
+    if (direction === "down" && idx === queueRef.current.length - 1) return;
+
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    handleReorderDnd(idx, targetIdx);
+  }, [handleReorderDnd]);
 
   // Remove track from queue (host only)
   const handleRemoveTrack = useCallback((idx: number) => {
@@ -347,6 +357,7 @@ const Room = () => {
             onLeave={handleLeaveRoom}
             onTrackClick={playTrack}
             onReorder={handleReorder}
+            onReorderDnd={handleReorderDnd}
             onRemove={handleRemoveTrack}
             onAddSong={handleAddSong}
             onLocalFileUpload={handleLocalFileUpload}
