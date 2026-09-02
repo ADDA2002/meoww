@@ -17,8 +17,8 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// Upload endpoint â€” our Cloudflare Worker that pushes to GitHub
-const UPLOAD_API = "https://meoww-upload-worker.<your-subdomain>.workers.dev/upload";
+// Upload endpoint — our Cloudflare Worker that pushes to GitHub
+const UPLOAD_API = "https://meoww-upload-worker.aditayadahiya20.workers.dev/upload";
 
 const GITHUB_REPO = "ADDA2002/Music-Storage-Folder";
 
