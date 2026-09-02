@@ -44,7 +44,7 @@ interface RoomDrawerProps {
   onUploadDone?: () => void;
 }
 
-const UPLOAD_API = "https://meoww-upload-worker.aditayadahiya20.workers.dev/upload";
+const UPLOAD_API = "/upload";
 
 const RoomDrawer: React.FC<RoomDrawerProps> = ({
   roomCode,
