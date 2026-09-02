@@ -1,5 +1,6 @@
 const GITHUB_REPO = "ADDA2002/Music-Storage-Folder";
 const GITHUB_BRANCH = "main";
+const FIREBASE_DB_URL = "https://meoww-audio-default-rtdb.asia-southeast1.firebasedatabase.app";
 
 export async function onRequestPost({ request, env }) {
   const corsHeaders = {
@@ -48,8 +49,19 @@ export async function onRequestPost({ request, env }) {
 
     // Check if already in playlist
     const url = `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/songs/${encodeURIComponent(safeName)}`;
-    const exists = songs.some((s) => s.url === url);
-    if (exists) {
+    const existing = songs.find((s) => s.url === url);
+    if (existing) {
+      // Backfill Firebase if it's missing
+      try {
+        const fbCheck = await fetch(`${FIREBASE_DB_URL}/songs/${existing.id}.json`);
+        if (fbCheck.status === 404) {
+          await fetch(`${FIREBASE_DB_URL}/songs/${existing.id}.json`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(existing),
+          });
+        }
+      } catch (_) { /* best-effort */ }
       return new Response(JSON.stringify({ skipped: true, reason: 'already in playlist', file: safeName, songsCount: songs.length }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -79,6 +91,21 @@ export async function onRequestPost({ request, env }) {
 
     const jsonContent = btoa(unescape(encodeURIComponent(JSON.stringify(songs, null, 2))));
     await ghPutFileRaw(env, 'songs.json', jsonContent, `Add ${safeName} to playlist`, songsSha);
+
+    // Write song metadata to Firebase Realtime Database (no auth — public DB)
+    try {
+      const fbRes = await fetch(`${FIREBASE_DB_URL}/songs/${nextId}.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTrack),
+      });
+      if (!fbRes.ok) {
+        const fbErr = await fbRes.text();
+        console.error('Firebase write failed:', fbRes.status, fbErr);
+      }
+    } catch (fbErr) {
+      console.error('Firebase write error:', fbErr);
+    }
 
     return new Response(JSON.stringify({ ok: true, file: safeName, songsCount: songs.length }), {
       status: 200,
