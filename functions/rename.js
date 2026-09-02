@@ -26,18 +26,26 @@ export async function onRequestGet({ request, env, params }) {
     const oldPath = `songs/${decodeURIComponent(oldFileName)}`;
     const newPath = `songs/${encodeURIComponent(newFileName)}`;
 
-    // 1. Get old file SHA + download
+    // 1. Get old file SHA from Contents API
     const metaRes = await ghGetFile(env, oldPath);
     if (!metaRes) throw new Error("File not found on GitHub");
     const oldSha = metaRes.sha;
 
-    // 2. Upload with new name (reuses same content)
-    await ghPutFileRaw(env, newPath, metaRes.content, `Rename ${oldFileName} to ${newFileName}`);
+    // 2. Download the raw bytes (Contents API may not include content for files >1MB)
+    const rawRes = await fetch(
+      `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/${oldPath}`
+    );
+    if (!rawRes.ok) throw new Error(`Failed to download original file: ${rawRes.status}`);
+    const arrayBuf = await rawRes.arrayBuffer();
+    const base64Content = arrayBufferToBase64(arrayBuf);
 
-    // 3. Delete old file
+    // 3. Upload with new name (reuses same content)
+    await ghPutFileRaw(env, newPath, base64Content, `Rename ${oldFileName} to ${newFileName}`);
+
+    // 4. Delete old file
     await ghDeleteFile(env, oldPath, oldSha);
 
-    // 4. Update Firebase
+    // 5. Update Firebase
     const newUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/${newPath}`;
     await fetch(`${FIREBASE_DB_URL}/songs/${trackId}.json`, {
       method: "PATCH",
@@ -114,4 +122,14 @@ function json(data, status, cors) {
     status,
     headers: { ...cors, 'Content-Type': 'application/json' },
   });
+}
+
+function arrayBufferToBase64(buf) {
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
