@@ -366,46 +366,6 @@ const Room = () => {
     setIsShuffle(!isShuffleRef.current);
   }, []);
 
-  // Add song to queue
-  const handleAddSong = useCallback((song: { title: string; artist: string; url: string }) => {
-    const newTrack: Track = {
-      id: `track-${Date.now()}`,
-      title: song.title,
-      artist: song.artist || "Independent Artist",
-      url: song.url,
-      addedBy: userName,
-    };
-
-    const updatedQueue = [...queueRef.current, newTrack];
-    setQueue(updatedQueue);
-
-    updatePlaybackStateRef.current?.({
-      queue: updatedQueue,
-      currentTrackIndex: currentIndexRef.current,
-    });
-  }, [userName]);
-
-  // Upload local file to queue
-  const handleLocalFileUpload = useCallback((file: File) => {
-    const fileUrl = URL.createObjectURL(file);
-    const newTrack: Track = {
-      id: `local-${Date.now()}`,
-      title: file.name.replace(/\.[^/.]+$/, ""),
-      artist: `${userName} (Local)`,
-      url: fileUrl,
-      addedBy: userName,
-      isLocalFile: true,
-    };
-
-    const updatedQueue = [...queueRef.current, newTrack];
-    setQueue(updatedQueue);
-
-    updatePlaybackStateRef.current?.({
-      queue: updatedQueue,
-      currentTrackIndex: currentIndexRef.current,
-    });
-  }, [userName]);
-
   // Reorder queue by drag-and-drop (host only)
   const handleReorderDnd = useCallback((fromIdx: number, toIdx: number) => {
     if (fromIdx === toIdx) return;
@@ -476,8 +436,20 @@ const Room = () => {
             onReorder={handleReorderDnd}
             onReorderDnd={handleReorderDnd}
             onRemove={handleRemoveTrack}
-            onAddSong={handleAddSong}
-            onLocalFileUpload={handleLocalFileUpload}
+            onUploadDone={async () => {
+              try {
+                if (db) {
+                  const snap = await get(ref(db, "songs"));
+                  if (snap.exists()) {
+                    const data = snap.val();
+                    const list: Track[] = Object.values(data);
+                    if (list.length > 0) setQueue(list);
+                  }
+                }
+              } catch (err) {
+                console.warn("[Room] failed to refresh after upload:", err);
+              }
+            }}
           />
         </div>
       </header>
