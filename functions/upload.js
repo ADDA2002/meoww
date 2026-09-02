@@ -1,6 +1,12 @@
-const GITHUB_REPO = "ADDA2002/Music-Storage-Folder";
-const GITHUB_BRANCH = "main";
 const FIREBASE_DB_URL = "https://meoww-audio-default-rtdb.asia-southeast1.firebasedatabase.app";
+
+const COVERS = [
+  'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?auto=format&fit=crop&w=300&q=80',
+  'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=300&q=80',
+  'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=300&q=80',
+  'https://images.unsplash.com/photo-1483412033650-1015ddeb83d1?auto=format&fit=crop&w=300&q=80',
+  'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=300&q=80',
+];
 
 export async function onRequestPost({ request, env }) {
   const corsHeaders = {
@@ -12,110 +18,58 @@ export async function onRequestPost({ request, env }) {
 
   const contentType = request.headers.get('Content-Type') || '';
   if (!contentType.includes('multipart/form-data')) {
-    return new Response(JSON.stringify({ error: 'Expected multipart/form-data' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ error: 'Expected multipart/form-data' }, 400, corsHeaders);
   }
 
   const form = await request.formData();
   const file = form.get('file');
   if (!file || typeof file === 'string') {
-    return new Response(JSON.stringify({ error: 'Missing file field' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ error: 'Missing file field' }, 400, corsHeaders);
   }
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   if (!safeName.toLowerCase().endsWith('.mp3')) {
-    return new Response(JSON.stringify({ error: 'Only MP3 files are allowed' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ error: 'Only MP3 files are allowed' }, 400, corsHeaders);
   }
 
   const arrayBuf = await file.arrayBuffer();
   const base64Content = arrayBufferToBase64(arrayBuf);
 
   try {
-    // Upload MP3 to GitHub
+    // 1) Upload MP3 to GitHub
     await ghPutFile(env, `songs/${safeName}`, base64Content, `Add ${safeName}`);
 
-    // Get songs.json
-    const songsMeta = await ghGetFile(env, 'songs.json');
-    const songs = songsMeta?.content ? JSON.parse(base64ToString(songsMeta.content)) : [];
-    const songsSha = songsMeta?.sha;
+    // 2) Get current songs to determine next id
+    const fbListRes = await fetch(`${FIREBASE_DB_URL}/songs.json`);
+    const fbList = fbListRes.ok ? await fbListRes.json() : null;
+    const songs = fbList ? Object.values(fbList) : [];
+    const nextId = String(songs.length > 0
+      ? Math.max(...songs.map((s) => parseInt(s?.id, 10) || 0)) + 1
+      : 1);
 
-    // Check if already in playlist
-    const url = `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/songs/${encodeURIComponent(safeName)}`;
-    const existing = songs.find((s) => s.url === url);
-    if (existing) {
-      // Backfill Firebase if it's missing
-      try {
-        const fbCheck = await fetch(`${FIREBASE_DB_URL}/songs/${existing.id}.json`);
-        if (fbCheck.status === 404) {
-          await fetch(`${FIREBASE_DB_URL}/songs/${existing.id}.json`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(existing),
-          });
-        }
-      } catch (_) { /* best-effort */ }
-      return new Response(JSON.stringify({ skipped: true, reason: 'already in playlist', file: safeName, songsCount: songs.length }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Add new track
-    const nextId = String(
-      songs.length > 0 ? Math.max(...songs.map((s) => parseInt(s.id, 10) || 0)) + 1 : 1
-    );
-    const covers = [
-      'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?auto=format&fit=crop&w=300&q=80',
-      'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=300&q=80',
-      'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=300&q=80',
-      'https://images.unsplash.com/photo-1483412033650-1015ddeb83d1?auto=format&fit=crop&w=300&q=80',
-      'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=300&q=80',
-    ];
-    const newTrack = {
+    const track = {
       id: nextId,
       title: prettyTitle(safeName.replace(/\.mp3$/i, '')),
       artist: 'Unknown Artist',
-      url: url,
-      cover: covers[Math.floor(Math.random() * covers.length)],
+      url: `https://raw.githubusercontent.com/ADDA2002/Music-Storage-Folder/main/songs/${encodeURIComponent(safeName)}`,
+      cover: COVERS[Math.floor(Math.random() * COVERS.length)],
       addedAt: Date.now(),
     };
-    songs.push(newTrack);
 
-    const jsonContent = btoa(unescape(encodeURIComponent(JSON.stringify(songs, null, 2))));
-    await ghPutFileRaw(env, 'songs.json', jsonContent, `Add ${safeName} to playlist`, songsSha);
-
-    // Write song metadata to Firebase Realtime Database (no auth — public DB)
-    try {
-      const fbRes = await fetch(`${FIREBASE_DB_URL}/songs/${nextId}.json`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTrack),
-      });
-      if (!fbRes.ok) {
-        const fbErr = await fbRes.text();
-        console.error('Firebase write failed:', fbRes.status, fbErr);
-      }
-    } catch (fbErr) {
-      console.error('Firebase write error:', fbErr);
+    // 3) Write to Firebase — instant in the app
+    const fbRes = await fetch(`${FIREBASE_DB_URL}/songs/${nextId}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(track),
+    });
+    if (!fbRes.ok) {
+      const err = await fbRes.text();
+      throw new Error(`Firebase write failed: ${fbRes.status} ${err}`);
     }
 
-    return new Response(JSON.stringify({ ok: true, file: safeName, songsCount: songs.length }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ ok: true, file: safeName, id: nextId }, 200, corsHeaders);
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message || 'Upload failed' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ error: err.message || 'Upload failed' }, 500, corsHeaders);
   }
 }
 
@@ -137,7 +91,7 @@ function prettyTitle(slug) {
 
 async function ghGetFile(env, path) {
   const res = await fetch(
-    `https://api.github.com/repos/${GITHUB_REPO}/contents/${path}?ref=${GITHUB_BRANCH}`,
+    `https://api.github.com/repos/ADDA2002/Music-Storage-Folder/contents/${path}?ref=main`,
     { headers: ghHeaders(env) }
   );
   if (res.status === 404) return null;
@@ -147,14 +101,10 @@ async function ghGetFile(env, path) {
 
 async function ghPutFile(env, path, base64Content, message) {
   const existing = await ghGetFile(env, path);
-  return ghPutFileRaw(env, path, base64Content, message, existing?.sha);
-}
-
-async function ghPutFileRaw(env, path, base64Content, message, sha) {
-  const body = { message, content: base64Content, branch: GITHUB_BRANCH };
-  if (sha) body.sha = sha;
+  const body = { message, content: base64Content, branch: 'main' };
+  if (existing?.sha) body.sha = existing.sha;
   const res = await fetch(
-    `https://api.github.com/repos/${GITHUB_REPO}/contents/${path}`,
+    `https://api.github.com/repos/ADDA2002/Music-Storage-Folder/contents/${path}`,
     { method: 'PUT', headers: ghHeaders(env), body: JSON.stringify(body) }
   );
   if (!res.ok) {
@@ -183,9 +133,9 @@ function arrayBufferToBase64(buf) {
   return btoa(binary);
 }
 
-function base64ToString(b64) {
-  const binary = atob(b64.replace(/\n/g, ''));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
+function json(data, status, cors) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...cors, 'Content-Type': 'application/json' },
+  });
 }
