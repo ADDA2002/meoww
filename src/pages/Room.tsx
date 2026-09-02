@@ -10,6 +10,7 @@ import RoomDrawer from "@/components/RoomDrawer";
 import { formatTime } from "@/lib/utils";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
+import { db, ref, get } from "@/lib/firebase";
 
 const SYNC_TICK_MS = 500;
 const RESYNC_THRESHOLD_SEC = 0.3;
@@ -27,7 +28,7 @@ const Room = () => {
   const [userName] = useState<string>(initialName);
   const isHost = initialIsHost;
 
-  const [queue, setQueue] = useState<Track[]>(DEFAULT_TRACKS);
+  const [queue, setQueue] = useState<Track[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -71,7 +72,7 @@ const Room = () => {
     });
   }, []);
 
-  // Play a track from the beginning — used for next/prev buttons and auto-play
+  // Play a track from the beginning â€” used for next/prev buttons and auto-play
   const playTrack = useCallback((idx: number) => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -92,7 +93,7 @@ const Room = () => {
 
     audio.play().catch(console.error);
 
-    // Immediate broadcast — explicitly pass isPlaying=true since audio.play()
+    // Immediate broadcast â€” explicitly pass isPlaying=true since audio.play()
     // fires async and React's isPlaying state hasn't updated yet
     broadcastState({ currentTrackIndex: idx, explicitIsPlaying: true });
   }, [broadcastState]);
@@ -147,7 +148,7 @@ const Room = () => {
         audio.pause();
       }
     } else {
-      // Same track — correct position if drift is too large
+      // Same track â€” correct position if drift is too large
       if (Math.abs(audio.currentTime - expectedTime) > RESYNC_THRESHOLD_SEC) {
         audio.currentTime = expectedTime;
         setCurrentTime(expectedTime);
@@ -165,7 +166,7 @@ const Room = () => {
   const handleIncomingMessage = useCallback((_msg: SyncMessage) => {
   }, []);
 
-  // Initialize audio element — paused, no auto-play
+  // Initialize audio element â€” paused, no auto-play
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "auto";
@@ -205,7 +206,7 @@ const Room = () => {
   }, []);
 
   // Host: load new track into audio element when currentTrack changes.
-  // Do NOT call audio.pause() here — playTrack() already handles loading
+  // Do NOT call audio.pause() here â€” playTrack() already handles loading
   // and playing. Pausing here would stop the audio that playTrack just started.
   useEffect(() => {
     if (!isHost) return;
@@ -247,6 +248,26 @@ const Room = () => {
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
+  // Load songs from Firebase /songs â€” falls back to DEFAULT_TRACKS if empty
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!db) return;
+        const snap = await get(ref(db, "songs"));
+        if (cancelled) return;
+        if (snap.exists()) {
+          const data = snap.val();
+          const list: Track[] = Object.values(data);
+          if (list.length > 0) setQueue(list);
+        }
+      } catch (err) {
+        console.warn("[Room] failed to load songs from Firebase:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Continuous position broadcast (host) + drift correction (member)
   useEffect(() => {
     if (!isHost) {
@@ -283,7 +304,7 @@ const Room = () => {
     return () => clearInterval(interval);
   }, [isHost]);
 
-  // Toggle play/pause — immediate broadcast with explicit isPlaying
+  // Toggle play/pause â€” immediate broadcast with explicit isPlaying
   const handleTogglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !audio.src) return;
