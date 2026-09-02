@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef } from "react";
-import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical, Loader2, CheckCircle2, XCircle, Pencil, Trash2, Search, XCircle as XCircleIcon } from "lucide-react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical, Loader2, CheckCircle2, XCircle, Pencil, Trash2, Search, XCircle as XCircleIcon, Youtube } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,6 +35,13 @@ interface UploadItem {
   file: File;
   status: "queued" | "uploading" | "done" | "error";
   message: string;
+}
+
+interface YtItem {
+  url: string;
+  status: "idle" | "fetching" | "converting" | "uploading" | "done" | "error";
+  message: string;
+  file?: File;
 }
 
 interface RoomDrawerProps {
@@ -78,6 +85,9 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
   const [renameError, setRenameError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [uploadTab, setUploadTab] = useState<"file" | "youtube">("file");
+  const [ytUrl, setYtUrl] = useState<string>("");
+  const [ytItems, setYtItems] = useState<YtItem[]>([]);
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
@@ -205,6 +215,111 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     }
   };
 
+  // ─── YouTube → MP3 conversion ───────────────────────────────────────────
+  const loadFFmpeg = async () => {
+    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+    const { fetchFile } = await import("@ffmpeg/util");
+    const ffmpeg = new FFmpeg();
+    // Load ffmpeg core from CDN (unpkg). With COEP:credentialless headers,
+    // cross-origin resources load without needing CORP headers.
+    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+    await ffmpeg.load({
+      coreURL: `${baseURL}/ffmpeg-core.js`,
+      wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+    });
+    return { ffmpeg, fetchFile };
+  };
+
+  const isValidYoutubeUrl = (url: string): string | null => {
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+      /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+      /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    ];
+    for (const p of patterns) {
+      const m = url.match(p);
+      if (m) return m[1];
+    }
+    return null;
+  };
+
+  const extractYoutubeId = (url: string): string | null => {
+    return isValidYoutubeUrl(url);
+  };
+
+  const convertYoutubeToMp3 = async (url: string): Promise<File> => {
+    const videoId = extractYoutubeId(url);
+    if (!videoId) throw new Error("Invalid YouTube URL");
+
+    // 1. Get audio URL via cobalt API
+    const apiRes = await fetch("https://cobalt.tools/api/json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, vQuality: "144", aFormat: "mp3" }),
+    });
+    if (!apiRes.ok) throw new Error(`Cobalt API error: ${apiRes.status}`);
+    const apiData = await apiRes.json() as { url?: string; message?: string; error?: string };
+    const audioUrl = apiData?.url;
+    if (!audioUrl) throw new Error(apiData?.error || apiData?.message || "No audio URL returned");
+
+    // 2. Download audio via proxy (cors bypass)
+    const proxyUrl = `https://allorigins.win/raw?url=${encodeURIComponent(audioUrl)}`;
+    const audioRes = await fetch(proxyUrl);
+    if (!audioRes.ok) throw new Error(`Failed to download audio: ${audioRes.status}`);
+    const arrayBuffer = await audioRes.arrayBuffer();
+
+    // 3. Load FFmpeg.wasm dynamically
+    const { ffmpeg, fetchFile } = await loadFFmpeg();
+
+    // 4. Write to virtual FS
+    await ffmpeg.writeFile("input", new Uint8Array(arrayBuffer));
+
+    // 5. Convert to mp3
+    await ffmpeg.exec(["-i", "input", "-vn", "-ab", "192k", "-f", "mp3", "output.mp3"]);
+
+    // 6. Read output
+    const data = await ffmpeg.readFile("output.mp3");
+    const blob = new Blob([data], { type: "audio/mpeg" });
+    const safeName = `${videoId}.mp3`;
+    return new File([blob], safeName, { type: "audio/mpeg" });
+  };
+
+  const handleYoutubeConvert = async () => {
+    const url = ytUrl.trim();
+    if (!url) return;
+    const videoId = extractYoutubeId(url);
+    if (!videoId) {
+      setYtItems(prev => [...prev, { url, status: "error", message: "Invalid YouTube URL" }]);
+      return;
+    }
+    const newItem: YtItem = { url, status: "fetching", message: "Getting audio..." };
+    setYtItems(prev => [...prev, newItem]);
+    setYtUrl("");
+
+    try {
+      setYtItems(prev => prev.map(it => it === newItem ? { ...it, status: "converting", message: "Converting to MP3..." } : it));
+      const file = await convertYoutubeToMp3(url);
+      setYtItems(prev => prev.map(it => it === newItem ? { ...it, status: "done", message: "✓ ready", file } : it));
+    } catch (err) {
+      setYtItems(prev => prev.map(it => it === newItem ? { ...it, status: "error", message: String(err instanceof Error ? err.message : err) } : it));
+    }
+  };
+
+  const uploadYtItem = async (item: YtItem) => {
+    if (!item.file) return;
+    setYtItems(prev => prev.map(it => it === item ? { ...it, status: "uploading", message: "Uploading..." } : it));
+    try {
+      const formData = new FormData();
+      formData.append("file", item.file);
+      const res = await fetch(UPLOAD_API, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      setYtItems(prev => prev.map(it => it === item ? { ...it, status: "done", message: data.skipped ? "already added" : "✓ added to playlist" } : it));
+    } catch (err) {
+      setYtItems(prev => prev.map(it => it === item ? { ...it, status: "error", message: String(err instanceof Error ? err.message : err) } : it));
+    }
+  };
+
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return;
     if (!isHost || !onReorderDnd) return;
@@ -316,27 +431,125 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                   </DialogTrigger>
                   <DialogContent className="border border-black bg-white text-black p-6 rounded-none shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-md">
                     <DialogHeader>
-                      <DialogTitle className="text-lg font-bold tracking-tight uppercase">Upload Songs</DialogTitle>
+                      <DialogTitle className="text-lg font-bold tracking-tight uppercase">Add Songs</DialogTitle>
                     </DialogHeader>
                     <div className="pt-2 space-y-3">
-                      <div className="p-5 border border-dashed border-black bg-gray-50 text-center space-y-2">
-                        <Upload className="w-6 h-6 mx-auto text-black" />
-                        <p className="text-xs font-semibold uppercase">Select MP3 Files</p>
-                        <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">
-                          Added to the shared playlist for everyone
-                        </p>
-                        <label className="inline-block mt-2 cursor-pointer bg-black text-white text-xs font-mono px-5 py-2 hover:bg-neutral-800 font-bold">
-                          SELECT FILES
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            multiple
-                            accept="audio/mpeg,audio/mp3,.mp3"
-                            onChange={handleFileInputChange}
-                            className="hidden"
-                          />
-                        </label>
+                      {/* Tab switcher */}
+                      <div className="flex border border-black">
+                        <button
+                          onClick={() => setUploadTab("file")}
+                          className={`flex-1 py-2 text-[11px] font-mono font-bold uppercase flex items-center justify-center gap-1.5 ${
+                            uploadTab === "file" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-50"
+                          }`}
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          MP3 Files
+                        </button>
+                        <button
+                          onClick={() => setUploadTab("youtube")}
+                          className={`flex-1 py-2 text-[11px] font-mono font-bold uppercase flex items-center justify-center gap-1.5 border-l border-black ${
+                            uploadTab === "youtube" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-50"
+                          }`}
+                        >
+                          <Youtube className="w-3.5 h-3.5" />
+                          YouTube URL
+                        </button>
                       </div>
+
+                      {uploadTab === "file" ? (
+                        <div className="p-5 border border-dashed border-black bg-gray-50 text-center space-y-2">
+                          <Upload className="w-6 h-6 mx-auto text-black" />
+                          <p className="text-xs font-semibold uppercase">Select MP3 Files</p>
+                          <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">
+                            Added to the shared playlist for everyone
+                          </p>
+                          <label className="inline-block mt-2 cursor-pointer bg-black text-white text-xs font-mono px-5 py-2 hover:bg-neutral-800 font-bold">
+                            SELECT FILES
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              multiple
+                              accept="audio/mpeg,audio/mp3,.mp3"
+                              onChange={handleFileInputChange}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="p-4 border border-dashed border-black bg-gray-50 text-center space-y-2">
+                            <Youtube className="w-6 h-6 mx-auto text-red-600" />
+                            <p className="text-xs font-semibold uppercase">Paste YouTube URL</p>
+                            <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">
+                              Audio is extracted in your browser, then uploaded
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Input
+                              value={ytUrl}
+                              onChange={(e) => setYtUrl(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") void handleYoutubeConvert();
+                              }}
+                              placeholder="https://youtube.com/watch?v=..."
+                              className="border border-black rounded-none font-mono text-xs h-9"
+                            />
+                            <Button
+                              onClick={() => void handleYoutubeConvert()}
+                              disabled={!ytUrl.trim() || ytItems.some(it => it.status === "fetching" || it.status === "converting")}
+                              className="bg-red-600 hover:bg-red-700 text-white rounded-none font-mono text-xs font-bold h-9 px-3"
+                            >
+                              CONVERT
+                            </Button>
+                          </div>
+                          <p className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">
+                            Click CONVERT then UPLOAD on the resulting file
+                          </p>
+                        </div>
+                      )}
+
+                      {/* YouTube items */}
+                      {ytItems.length > 0 && (
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {ytItems.map((item, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center gap-2 px-3 py-2 border border-gray-200 bg-white"
+                            >
+                              {item.status === "fetching" || item.status === "converting" ? (
+                                <Loader2 className="w-3.5 h-3.5 text-yellow-600 animate-spin flex-shrink-0" />
+                              ) : item.status === "uploading" ? (
+                                <Loader2 className="w-3.5 h-3.5 text-yellow-600 animate-spin flex-shrink-0" />
+                              ) : item.status === "done" ? (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                              ) : item.status === "error" ? (
+                                <XCircle className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />
+                              ) : (
+                                <Youtube className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />
+                              )}
+                              <span className="flex-1 text-xs truncate">
+                                {item.url}
+                              </span>
+                              <span className={`text-[10px] font-mono flex-shrink-0 ${
+                                item.status === "done" ? "text-green-600" :
+                                item.status === "error" ? "text-red-600" :
+                                item.status === "uploading" || item.status === "fetching" || item.status === "converting" ? "text-yellow-600" : "text-gray-400"
+                              }`}>
+                                {item.message}
+                              </span>
+                              {item.status === "done" && item.file && (
+                                <Button
+                                  onClick={() => void uploadYtItem(item)}
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px] font-mono font-bold bg-black hover:bg-neutral-800 text-white"
+                                >
+                                  UPLOAD
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       {uploadItems.length > 0 && (
                         <div className="space-y-1.5 max-h-48 overflow-y-auto">
