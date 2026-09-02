@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef } from "react";
-import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical, Loader2, CheckCircle2, XCircle, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -23,6 +24,12 @@ import {
   type DropResult,
 } from "@hello-pangea/dnd";
 import { Track } from "@/types/music";
+
+const FIREBASE_DB_URL = "https://meoww-audio-default-rtdb.asia-southeast1.firebasedatabase.app";
+
+function prettyTitle(slug: string): string {
+  return slug.replace(/\.mp3$/i, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (c: string) => c.toUpperCase());
+}
 
 interface UploadItem {
   file: File;
@@ -64,6 +71,12 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameTrack, setRenameTrack] = useState<Track | null>(null);
+  const [renameName, setRenameName] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
@@ -131,6 +144,63 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     if (!isOpen) {
       // Keep results visible briefly, but reset on close
       setTimeout(() => setUploadItems([]), 500);
+    }
+  };
+
+  const openRename = (track: Track) => {
+    const current = track.url.split('/songs/')[1]?.split('?')[0] || "";
+    setRenameTrack(track);
+    setRenameName(decodeURIComponent(current));
+    setRenameError(null);
+    setRenameOpen(true);
+  };
+
+  const closeRename = () => {
+    setRenameOpen(false);
+    setRenameTrack(null);
+    setRenameName("");
+    setRenameError(null);
+  };
+
+  const handleRename = async () => {
+    if (!renameTrack) return;
+    const oldFileName = renameTrack.url.split('/songs/')[1]?.split('?')[0] || "";
+    const newFileName = renameName.trim();
+    if (!newFileName) {
+      setRenameError("Enter a new name");
+      return;
+    }
+    if (newFileName === oldFileName) {
+      setRenameError("Name is the same");
+      return;
+    }
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      const res = await fetch(
+        `/rename?trackId=${encodeURIComponent(renameTrack.id)}&oldFileName=${encodeURIComponent(oldFileName)}&newFileName=${encodeURIComponent(newFileName)}`
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Rename failed");
+      closeRename();
+    } catch (err) {
+      setRenameError(String(err instanceof Error ? err.message : err));
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const handleDelete = async (track: Track) => {
+    if (!confirm(`Remove "${track.title}" from the playlist? This deletes the file too.`)) return;
+    setDeletingId(track.id);
+    try {
+      const res = await fetch(`/delete?trackId=${encodeURIComponent(track.id)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Delete failed");
+    } catch (err) {
+      alert(String(err instanceof Error ? err.message : err));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -322,6 +392,35 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                                       {track.artist}
                                     </p>
                                   </div>
+                                  {isHost && (
+                                    <>
+                                      <button
+                                        onClick={() => openRename(track)}
+                                        className={`flex-shrink-0 p-1 transition-colors ${
+                                          isCurrent ? "text-gray-300 hover:text-white" : "text-gray-400 hover:text-black"
+                                        }`}
+                                        aria-label="Rename track"
+                                        title="Rename"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => handleDelete(track)}
+                                        disabled={deletingId === track.id}
+                                        className={`flex-shrink-0 p-1 transition-colors ${
+                                          isCurrent ? "text-gray-300 hover:text-white" : "text-gray-400 hover:text-red-600"
+                                        } disabled:opacity-50`}
+                                        aria-label="Delete track"
+                                        title="Delete"
+                                      >
+                                        {deletingId === track.id ? (
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        ) : (
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        )}
+                                      </button>
+                                    </>
+                                  )}
                                   {onRemove && (
                                     <button
                                       onClick={() => onRemove(idx)}
@@ -394,6 +493,63 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
           </div>
         </div>
       </SheetContent>
+
+      <Dialog open={renameOpen} onOpenChange={(o) => !o && closeRename()}>
+        <DialogContent className="border border-black bg-white text-black p-6 rounded-none shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold tracking-tight uppercase">Rename Track</DialogTitle>
+          </DialogHeader>
+          <div className="pt-2 space-y-3">
+            <p className="text-[11px] font-mono text-gray-500 uppercase tracking-wider">
+              Renames the file on GitHub and updates the playlist. .mp3 is added automatically.
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-mono uppercase text-gray-500 tracking-wider">New file name</label>
+              <Input
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !renaming) void handleRename();
+                }}
+                placeholder="new-song-name.mp3"
+                className="border border-black rounded-none font-mono text-sm h-10"
+                disabled={renaming}
+                autoFocus
+              />
+            </div>
+            {renameError && (
+              <p className="text-[11px] font-mono text-red-600 uppercase">{renameError}</p>
+            )}
+            <div className="flex gap-2 pt-1">
+              <Button
+                onClick={closeRename}
+                variant="outline"
+                disabled={renaming}
+                className="flex-1 border-black rounded-none font-mono text-xs font-semibold"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleRename()}
+                disabled={renaming}
+                className="flex-1 bg-black hover:bg-neutral-800 text-white rounded-none font-mono text-xs font-bold"
+              >
+                {renaming ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                    RENAMING...
+                  </>
+                ) : (
+                  <>
+                    <Pencil className="w-3.5 h-3.5 mr-1" />
+                    RENAME
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   );
 };
