@@ -251,36 +251,51 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     const videoId = extractYoutubeId(url);
     if (!videoId) throw new Error("Invalid YouTube URL");
 
-    // 1. Get audio URL via cobalt API
-    const apiRes = await fetch("https://cobalt.tools/api/json", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, vQuality: "144", aFormat: "mp3" }),
-    });
-    if (!apiRes.ok) throw new Error(`Cobalt API error: ${apiRes.status}`);
-    const apiData = await apiRes.json() as { url?: string; message?: string; error?: string };
-    const audioUrl = apiData?.url;
-    if (!audioUrl) throw new Error(apiData?.error || apiData?.message || "No audio URL returned");
+    // 1. Use youtubei.js to get video info + audio stream URL from YouTube's internal API
+    const { Innertube } = await import("youtubei.js");
+    const yt = await Innertube.create();
+    const info = await yt.getBasicInfo(videoId);
+    const title = (info.basic_info as any)?.title || videoId;
 
-    // 2. Download audio via proxy (cors bypass)
-    const proxyUrl = `https://allorigins.win/raw?url=${encodeURIComponent(audioUrl)}`;
+    // 2. Pick the best audio-only format (prefer highest bitrate m4a/webm)
+    const audioFormats = info.streaming_data?.adaptive_formats
+      .filter((f: any) => f.mime_type?.startsWith("audio/"))
+      .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+
+    if (!audioFormats || audioFormats.length === 0) {
+      throw new Error("No audio format found for this video");
+    }
+    const bestAudio = audioFormats[0];
+    const audioStreamUrl: string | undefined = bestAudio.url;
+    if (!audioStreamUrl) throw new Error("No audio URL found");
+
+    // 3. Download audio. YouTube's googlevideo.com has CORS, so use a CORS proxy.
+    const proxyUrl = `https://allorigins.win/raw?url=${encodeURIComponent(audioStreamUrl)}`;
     const audioRes = await fetch(proxyUrl);
     if (!audioRes.ok) throw new Error(`Failed to download audio: ${audioRes.status}`);
     const arrayBuffer = await audioRes.arrayBuffer();
 
-    // 3. Load FFmpeg.wasm dynamically
-    const { ffmpeg, fetchFile } = await loadFFmpeg();
+    // 4. Load FFmpeg.wasm dynamically
+    const { ffmpeg } = await loadFFmpeg();
 
-    // 4. Write to virtual FS
-    await ffmpeg.writeFile("input", new Uint8Array(arrayBuffer));
+    // 5. Write to virtual FS
+    const ext = bestAudio.mime_type?.includes("webm") ? "webm" : "m4a";
+    await ffmpeg.writeFile(`input.${ext}`, new Uint8Array(arrayBuffer));
 
-    // 5. Convert to mp3
-    await ffmpeg.exec(["-i", "input", "-vn", "-ab", "192k", "-f", "mp3", "output.mp3"]);
+    // 6. Convert to mp3
+    await ffmpeg.exec(["-i", `input.${ext}`, "-vn", "-ab", "192k", "-ar", "44100", "-f", "mp3", "output.mp3"]);
 
-    // 6. Read output
+    // 7. Read output
     const data = await ffmpeg.readFile("output.mp3");
     const blob = new Blob([data], { type: "audio/mpeg" });
-    const safeName = `${videoId}.mp3`;
+
+    // 8. Build a safe filename from the YouTube title
+    const safeBase = title
+      .replace(/[^\w\s.-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 100) || videoId;
+    const safeName = `${safeBase}.mp3`;
     return new File([blob], safeName, { type: "audio/mpeg" });
   };
 
