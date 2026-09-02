@@ -452,11 +452,7 @@ const Room = () => {
         {isHost ? (
           <>
             <div className="w-full aspect-square bg-gray-100 border-2 border-black flex items-center justify-center mb-4 overflow-hidden">
-              {currentTrack?.cover ? (
-                <img src={currentTrack.cover} alt="Cover" className="w-full h-full object-cover grayscale" />
-              ) : (
-                <Music className="w-24 h-24 text-gray-400" />
-              )}
+              <Music className="w-24 h-24 text-gray-300" />
             </div>
 
             <div className="text-center mb-5">

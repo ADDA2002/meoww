@@ -1,13 +1,5 @@
 const FIREBASE_DB_URL = "https://meoww-audio-default-rtdb.asia-southeast1.firebasedatabase.app";
 
-const COVERS = [
-  'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?auto=format&fit=crop&w=300&q=80',
-  'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=300&q=80',
-  'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=300&q=80',
-  'https://images.unsplash.com/photo-1483412033650-1015ddeb83d1?auto=format&fit=crop&w=300&q=80',
-  'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=300&q=80',
-];
-
 export async function onRequestPost({ request, env }) {
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -53,7 +45,6 @@ export async function onRequestPost({ request, env }) {
       title: prettyTitle(safeName.replace(/\.mp3$/i, '')),
       artist: 'Unknown Artist',
       url: `https://raw.githubusercontent.com/ADDA2002/Music-Storage-Folder/main/songs/${encodeURIComponent(safeName)}`,
-      cover: COVERS[Math.floor(Math.random() * COVERS.length)],
       sha: fileSha,
       addedAt: Date.now(),
     };

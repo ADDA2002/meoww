@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from "react";
-import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical, Loader2, CheckCircle2, XCircle, Pencil, Trash2 } from "lucide-react";
+import { Menu, Copy, Check, LogOut, X, Music, Plus, Upload, GripVertical, Loader2, CheckCircle2, XCircle, Pencil, Trash2, Search, XCircle as XCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -77,6 +77,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
@@ -211,6 +212,13 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     onReorderDnd(result.source.index, result.destination.index);
   };
 
+  const filteredQueue = searchQuery.trim()
+    ? queue.filter(t =>
+        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.artist.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : queue;
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
@@ -271,10 +279,34 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
 
           {/* Playlist Section */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-mono uppercase text-gray-500 tracking-wider">
-                Playlist ({queue.length})
+            {/* Search + count */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search songs..."
+                  className="w-full pl-8 pr-8 h-9 border border-gray-300 text-xs font-mono bg-white focus:outline-none focus:border-black placeholder:text-gray-400"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black"
+                    aria-label="Clear search"
+                  >
+                    <XCircleIcon className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
+              <span className="text-[11px] font-mono text-gray-500 whitespace-nowrap flex-shrink-0">
+                {searchQuery.trim()
+                  ? `${filteredQueue.length} / ${queue.length}`
+                  : queue.length}
+              </span>
+            </div>
+            <div className="flex items-center justify-end">
               {isHost && (
                 <Dialog open={uploadOpen} onOpenChange={handleUploadDialogChange}>
                   <DialogTrigger asChild>
@@ -358,9 +390,15 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                           <Music className="w-6 h-6 mx-auto mb-2" />
                           No songs in queue
                         </div>
+                      ) : filteredQueue.length === 0 ? (
+                        <div className="p-4 border border-dashed border-gray-300 text-center text-gray-400 text-xs font-mono">
+                          <Search className="w-6 h-6 mx-auto mb-2" />
+                          No results for "{searchQuery}"
+                        </div>
                       ) : (
-                        queue.map((track, idx) => {
-                          const isCurrent = idx === currentIndex;
+                        filteredQueue.map((track, idx) => {
+                          const realIdx = queue.findIndex(t => t.id === track.id);
+                          const isCurrent = realIdx === currentIndex;
                           return (
                             <Draggable key={track.id} draggableId={track.id} index={idx}>
                               {(provided, snapshot) => (
@@ -381,12 +419,15 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                                   >
                                     <GripVertical className="w-4 h-4" />
                                   </span>
+                                  <Music className={`w-4 h-4 flex-shrink-0 ${
+                                    isCurrent ? "text-gray-300" : "text-gray-400"
+                                  }`} />
                                   <div
                                     className="flex-1 min-w-0 cursor-pointer"
-                                    onClick={() => onTrackClick?.(idx)}
+                                    onClick={() => onTrackClick?.(realIdx)}
                                   >
                                     <p className="font-bold text-xs truncate">
-                                      {idx + 1}. {track.title}
+                                      {track.title}
                                     </p>
                                     <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>
                                       {track.artist}
@@ -423,7 +464,7 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                                   )}
                                   {onRemove && (
                                     <button
-                                      onClick={() => onRemove(idx)}
+                                      onClick={() => onRemove(realIdx)}
                                       className={`flex-shrink-0 p-1 transition-colors ${
                                         isCurrent ? "text-gray-300 hover:text-white" : "text-gray-400 hover:text-black"
                                       }`}
@@ -450,18 +491,29 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
                     <Music className="w-6 h-6 mx-auto mb-2" />
                     No songs in queue
                   </div>
+                ) : filteredQueue.length === 0 ? (
+                  <div className="p-4 border border-dashed border-gray-300 text-center text-gray-400 text-xs font-mono">
+                    <Search className="w-6 h-6 mx-auto mb-2" />
+                    No results for "{searchQuery}"
+                  </div>
                 ) : (
-                  queue.map((track, idx) => {
-                    const isCurrent = idx === currentIndex;
+                  filteredQueue.map((track) => {
+                    const realIdx = queue.findIndex(t => t.id === track.id);
+                    const isCurrent = realIdx === currentIndex;
                     return (
                       <div
                         key={track.id}
-                        className={`p-2.5 border transition-colors ${
+                        className={`p-2.5 border transition-colors flex items-center gap-2 ${
                           isCurrent ? "bg-black text-white border-black" : "bg-white text-black border-gray-200"
                         }`}
                       >
-                        <p className="font-bold text-xs truncate">{idx + 1}. {track.title}</p>
-                        <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>{track.artist}</p>
+                        <Music className={`w-4 h-4 flex-shrink-0 ${
+                          isCurrent ? "text-gray-300" : "text-gray-400"
+                        }`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-xs truncate">{track.title}</p>
+                          <p className={`text-[11px] truncate ${isCurrent ? "text-gray-300" : "text-gray-500"}`}>{track.artist}</p>
+                        </div>
                       </div>
                     );
                   })
