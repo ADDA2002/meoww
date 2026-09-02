@@ -10,7 +10,7 @@ import RoomDrawer from "@/components/RoomDrawer";
 import { formatTime } from "@/lib/utils";
 import { useFirebaseSync } from "@/hooks/useFirebaseSync";
 import { FirebaseSyncState } from "@/lib/firebaseSignaling";
-import { db, ref, get } from "@/lib/firebase";
+import { db, ref, get, onValue } from "@/lib/firebase";
 
 const SYNC_TICK_MS = 500;
 const RESYNC_THRESHOLD_SEC = 0.3;
@@ -248,24 +248,18 @@ const Room = () => {
     setMyId(generatedId);
   }, [roomCode, isHost]);
 
-  // Load songs from Firebase /songs â€” falls back to DEFAULT_TRACKS if empty
+  // Live listener: songs from Firebase /songs — updates instantly when GitHub Action syncs
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        if (!db) return;
-        const snap = await get(ref(db, "songs"));
-        if (cancelled) return;
-        if (snap.exists()) {
-          const data = snap.val();
-          const list: Track[] = Object.values(data);
-          if (list.length > 0) setQueue(list);
-        }
-      } catch (err) {
-        console.warn("[Room] failed to load songs from Firebase:", err);
+    if (!db) return;
+    const songsRef = ref(db, "songs");
+    const unsubscribe = onValue(songsRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.val();
+        const list: Track[] = Object.values(data).filter(Boolean);
+        if (list.length > 0) setQueue(list);
       }
-    })();
-    return () => { cancelled = true; };
+    });
+    return () => unsubscribe();
   }, []);
 
   // Continuous position broadcast (host) + drift correction (member)

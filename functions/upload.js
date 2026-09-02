@@ -37,12 +37,13 @@ export async function onRequestPost({ request, env }) {
 
   try {
     // 1) Upload MP3 to GitHub
-    await ghPutFile(env, `songs/${safeName}`, base64Content, `Add ${safeName}`);
+    const ghRes = await ghPutFile(env, `songs/${safeName}`, base64Content, `Add ${safeName}`);
+    const fileSha = ghRes.content?.sha;
 
     // 2) Get current songs to determine next id
     const fbListRes = await fetch(`${FIREBASE_DB_URL}/songs.json`);
     const fbList = fbListRes.ok ? await fbListRes.json() : null;
-    const songs = fbList ? Object.values(fbList) : [];
+    const songs = fbList ? Object.values(fbList).filter(Boolean) : [];
     const nextId = String(songs.length > 0
       ? Math.max(...songs.map((s) => parseInt(s?.id, 10) || 0)) + 1
       : 1);
@@ -53,6 +54,7 @@ export async function onRequestPost({ request, env }) {
       artist: 'Unknown Artist',
       url: `https://raw.githubusercontent.com/ADDA2002/Music-Storage-Folder/main/songs/${encodeURIComponent(safeName)}`,
       cover: COVERS[Math.floor(Math.random() * COVERS.length)],
+      sha: fileSha,
       addedAt: Date.now(),
     };
 
