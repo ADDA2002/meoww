@@ -39,9 +39,10 @@ interface UploadItem {
 
 interface YtItem {
   url: string;
-  status: "idle" | "fetching" | "converting" | "uploading" | "done" | "error";
+  status: "idle" | "fetching" | "converting" | "uploading" | "done" | "error" | "verify";
   message: string;
   file?: File;
+  videoId?: string;
 }
 
 interface RoomDrawerProps {
@@ -88,6 +89,8 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
   const [uploadTab, setUploadTab] = useState<"file" | "youtube">("file");
   const [ytUrl, setYtUrl] = useState<string>("");
   const [ytItems, setYtItems] = useState<YtItem[]>([]);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyUrl, setVerifyUrl] = useState("");
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
@@ -254,7 +257,14 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     // 1. Use youtubei.js to get video info + audio stream URL from YouTube's internal API
     const { Innertube } = await import("youtubei.js");
     const yt = await Innertube.create();
-    const info = await yt.getBasicInfo(videoId);
+    let info;
+    try {
+      info = await yt.getBasicInfo(videoId);
+    } catch (err) {
+      const msg = String(err instanceof Error ? err.message : err);
+      // YouTube blocks the request — treat as bot detection
+      throw new Error(`__BOT_DETECTED__ ${msg}`);
+    }
     const title = (info.basic_info as any)?.title || videoId;
 
     // 2. Pick the best audio-only format (prefer highest bitrate m4a/webm)
@@ -299,8 +309,8 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     return new File([blob], safeName, { type: "audio/mpeg" });
   };
 
-  const handleYoutubeConvert = async () => {
-    const url = ytUrl.trim();
+  const handleYoutubeConvert = async (overrideUrl?: string) => {
+    const url = (overrideUrl ?? ytUrl).trim();
     if (!url) return;
     const videoId = extractYoutubeId(url);
     if (!videoId) {
@@ -309,14 +319,22 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
     }
     const newItem: YtItem = { url, status: "fetching", message: "Getting audio..." };
     setYtItems(prev => [...prev, newItem]);
-    setYtUrl("");
+    if (!overrideUrl) setYtUrl("");
 
     try {
       setYtItems(prev => prev.map(it => it === newItem ? { ...it, status: "converting", message: "Converting to MP3..." } : it));
       const file = await convertYoutubeToMp3(url);
       setYtItems(prev => prev.map(it => it === newItem ? { ...it, status: "done", message: "✓ ready", file } : it));
     } catch (err) {
-      setYtItems(prev => prev.map(it => it === newItem ? { ...it, status: "error", message: String(err instanceof Error ? err.message : err) } : it));
+      const msg = String(err instanceof Error ? err.message : err);
+      if (msg.startsWith("__BOT_DETECTED__")) {
+        // Bot detected — open verification dialog
+        setVerifyUrl(url);
+        setVerifyOpen(true);
+        setYtItems(prev => prev.map(it => it === newItem ? { ...it, status: "verify", message: "Please click below to verify you're human by opening YouTube in this browser" } : it));
+      } else {
+        setYtItems(prev => prev.map(it => it === newItem ? { ...it, status: "error", message: msg } : it));
+      }
     }
   };
 
@@ -773,6 +791,50 @@ const RoomDrawer: React.FC<RoomDrawerProps> = ({
           </div>
         </div>
       </SheetContent>
+
+      {/* Human Verification Dialog */}
+      <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
+        <DialogContent className="border border-black bg-white text-black p-6 rounded-none shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold tracking-tight uppercase">
+              Verify you're human
+            </DialogTitle>
+          </DialogHeader>
+          <div className="pt-2 space-y-3">
+            <p className="text-xs font-mono text-gray-600">
+              YouTube blocked the audio extraction because it looks like a bot.
+              To fix this, open YouTube yourself — once your browser has visited
+              YouTube, it will have the cookies needed to extract the audio.
+            </p>
+            <div className="space-y-2">
+              <Button
+                onClick={() => {
+                  // Open YouTube in a new tab so the browser gets real cookies
+                  window.open("https://www.youtube.com", "_blank", "noopener,noreferrer");
+                }}
+                className="w-full bg-red-600 hover:bg-red-700 text-white rounded-none font-mono text-xs font-bold py-2"
+              >
+                <Youtube className="w-3.5 h-3.5 mr-1.5 inline" />
+                OPEN YOUTUBE IN THIS BROWSER — THEN COME BACK HERE
+              </Button>
+              <Button
+                onClick={() => {
+                  setVerifyOpen(false);
+                  void handleYoutubeConvert(verifyUrl);
+                }}
+                disabled={!verifyUrl}
+                className="w-full bg-black hover:bg-neutral-800 text-white rounded-none font-mono text-xs font-bold py-2"
+              >
+                <Music className="w-3.5 h-3.5 mr-1.5 inline" />
+                TRY AGAIN (after opening YouTube)
+              </Button>
+            </div>
+            <p className="text-[10px] font-mono text-gray-400 uppercase">
+              After clicking the button above, go back here and click TRY AGAIN
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={renameOpen} onOpenChange={(o) => !o && closeRename()}>
         <DialogContent className="border border-black bg-white text-black p-6 rounded-none shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-md">
